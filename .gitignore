@@ -1,0 +1,30 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment (se você usar um como venv, env, .venv, etc.)
+venv/
+env/
+.venv/
+*/venv/
+*/env/
+*/.venv/
+
+# SQLite Database file (Geralmente não versionamos o BD em si)
+*.db
+*.db-journal # Arquivos temporários do SQLite
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE/Editor specific files (Exemplos, ajuste conforme sua IDE)
+.idea/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+
+# Arquivos de log (se gerarmos algum)
+*.log
