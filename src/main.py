@@ -8,11 +8,15 @@ import pandas as pd
 from src.config import logger, TABLE_NAME, DATABASE_PATH
 from src.data_loader import load_and_clean_data
 from src.database_manager import save_to_db, read_data_from_db
+# Renomeamos o import aqui para clareza, pois 'calculate_frequency' é usado dentro de cycle_analysis
 from src.analysis.frequency_analysis import (
-    calculate_overall_frequency, calculate_windowed_frequency, calculate_cumulative_frequency_history
+    calculate_frequency as calculate_period_frequency,
+    calculate_windowed_frequency,
+    calculate_cumulative_frequency_history
 )
 from src.analysis.combination_analysis import calculate_combination_frequency
-from src.analysis.cycle_analysis import identify_cycles
+# Importa as funções de ciclo
+from src.analysis.cycle_analysis import identify_cycles, run_cycle_frequency_analysis
 from src.analysis.delay_analysis import calculate_current_delay
 from src.analysis.number_properties_analysis import analyze_number_properties, summarize_properties
 
@@ -37,7 +41,7 @@ def run_pipeline(args: argparse.Namespace):
     logger.info("Iniciando a aplicação Lotofacil Analysis")
 
     # --- Bloco de Carga/Salvamento ---
-    if args.reload: # Verifica se --reload foi passado
+    if args.reload:
         logger.info("Opção '--reload' ativa. Recarregando do Excel e salvando no BD.")
         cleaned_data = load_and_clean_data()
         if cleaned_data is not None:
@@ -51,7 +55,6 @@ def run_pipeline(args: argparse.Namespace):
             return
     else:
         logger.info("Opção '--reload' inativa. Assumindo que os dados estão no BD.")
-        # Verifica rapidamente se o BD existe e tem a tabela
         test_read = read_data_from_db(columns=['concurso'], concurso_maximo=1)
         if test_read is None or test_read.empty:
              logger.error(f"Não foi possível ler dados do BD. Execute com --reload ou verifique o BD.")
@@ -67,13 +70,15 @@ def run_pipeline(args: argparse.Namespace):
     run_pair = run_all or 'pair' in args.analysis
     run_comb = run_all or 'comb' in args.analysis
     run_cycle = run_all or 'cycle' in args.analysis
+    run_cycle_stats = run_all or 'cycle-stats' in args.analysis # Flag para stats por ciclo
     run_delay = run_all or 'delay' in args.analysis
     run_props = run_all or 'props' in args.analysis
 
     # --- Passo 3: Análises de Frequência ---
     if run_freq:
         logger.info(f"Iniciando análises de frequência (até concurso {max_concurso or 'último'})...")
-        overall_freq = calculate_overall_frequency(concurso_maximo=max_concurso)
+        # Usamos a função renomeada aqui para evitar conflito com a importada em cycle_analysis
+        overall_freq = calculate_period_frequency(concurso_maximo=max_concurso)
         if overall_freq is not None:
             print("\n--- Frequência Geral das Dezenas ---")
             print(overall_freq.to_string())
@@ -91,7 +96,6 @@ def run_pipeline(args: argparse.Namespace):
             if window_freq is not None:
                 print(f"\n--- Frequência nos Últimos {window} Concursos ---")
                 print(window_freq.to_string())
-                # Poderia adicionar plot aqui também se desejado
 
         cumulative_hist = calculate_cumulative_frequency_history(concurso_maximo=max_concurso)
         if cumulative_hist is not None:
@@ -136,17 +140,26 @@ def run_pipeline(args: argparse.Namespace):
         logger.info("Análises de combinação (Trios+) concluídas.")
 
 
-    # --- Passo 5: Análise de Ciclos ---
-    if run_cycle:
-        logger.info(f"Iniciando análise de ciclos (até concurso {max_concurso or 'último'})...")
+    # --- Passo 5 e 11: Análise de Ciclos e Stats Dentro dos Ciclos ---
+    # Precisa identificar os ciclos primeiro, se uma das análises for solicitada
+    cycles_summary = None
+    if run_cycle or run_cycle_stats:
+        logger.info(f"Iniciando identificação de ciclos...")
         cycles_summary = identify_cycles()
-        if cycles_summary is not None and not cycles_summary.empty:
-             if max_concurso:
-                 cycles_summary_filtered = cycles_summary[cycles_summary['concurso_fim'] <= max_concurso].copy()
-             else:
-                 cycles_summary_filtered = cycles_summary
+        if cycles_summary is None:
+             logger.error("Falha na identificação de ciclos. Análises de ciclo e stats por ciclo abortadas.")
+        else:
+            logger.info("Identificação de ciclos concluída.")
 
-             if not cycles_summary_filtered.empty:
+    # Executa a exibição do resumo se 'cycle' foi pedido
+    if run_cycle and cycles_summary is not None:
+        if not cycles_summary.empty:
+            if max_concurso:
+                cycles_summary_filtered = cycles_summary[cycles_summary['concurso_fim'] <= max_concurso].copy()
+            else:
+                cycles_summary_filtered = cycles_summary
+
+            if not cycles_summary_filtered.empty:
                 print("\n--- Resumo dos Ciclos Completos da Lotofácil ---")
                 print(cycles_summary_filtered.to_string(index=False))
                 avg_duration = cycles_summary_filtered['duracao'].mean()
@@ -157,16 +170,18 @@ def run_pipeline(args: argparse.Namespace):
                 print(f"- Duração Média: {avg_duration:.2f} concursos")
                 print(f"- Ciclo Mais Curto: {min_duration} concursos")
                 print(f"- Ciclo Mais Longo: {max_duration} concursos")
-                # Adicionar plot de histograma de duração do ciclo se should_plot
-                # if should_plot: plot_cycle_duration_hist(cycles_summary_filtered, ...) # Função a criar
-             else:
+                # Plot aqui se necessário
+            else:
                  logger.info(f"Nenhum ciclo completo encontrado até o concurso {max_concurso}.")
-
-        elif cycles_summary is not None and cycles_summary.empty:
-             logger.info("Nenhum ciclo completo foi encontrado nos dados.")
         else:
-            logger.error("Falha ao executar a análise de ciclos.")
-        logger.info("Análise de ciclos concluída.")
+            logger.info("Nenhum ciclo completo foi identificado nos dados.")
+
+    # Executa a análise DENTRO dos ciclos se 'cycle-stats' foi pedido
+    if run_cycle_stats and cycles_summary is not None:
+         run_cycle_frequency_analysis(cycles_summary) # Chama a função que calcula e imprime
+         logger.info("Análise de stats por ciclo concluída.")
+    elif run_cycle_stats and cycles_summary is None:
+         logger.error("Não foi possível executar 'cycle-stats' pois a identificação de ciclos falhou.")
 
 
     # --- Passo 8: Análise de Atrasos ---
@@ -176,8 +191,7 @@ def run_pipeline(args: argparse.Namespace):
         if current_delays is not None:
             print("\n--- Atraso Atual das Dezenas ---")
             print(current_delays.to_string())
-            # Adicionar plot de barras de atraso se should_plot
-            # if should_plot: plot_delay_bar(current_delays, ...) # Função a criar
+            # Plot aqui se necessário
         else:
             logger.error("Falha ao calcular o atraso atual das dezenas.")
         logger.info("Análise de atraso atual concluída.")
@@ -194,25 +208,19 @@ def run_pipeline(args: argparse.Namespace):
                 print("\n--- Frequência da Distribuição Pares/Ímpares ---")
                 print(prop_summaries['par_impar'].to_string())
                 if should_plot:
-                    plot_distribution_bar(prop_summaries['par_impar'],
-                                          "Distribuição Pares/Ímpares",
-                                          "dist_par_impar")
+                    plot_distribution_bar(prop_summaries['par_impar'], "Distribuição Pares/Ímpares", "dist_par_impar")
 
             if 'primos' in prop_summaries:
                 print("\n--- Frequência da Quantidade de Números Primos ---")
                 print(prop_summaries['primos'].to_string())
                 if should_plot:
-                    plot_distribution_bar(prop_summaries['primos'],
-                                          "Distribuição de Qtd. Primos",
-                                          "dist_primos")
+                    plot_distribution_bar(prop_summaries['primos'], "Distribuição de Qtd. Primos", "dist_primos")
 
             if 'moldura_miolo' in prop_summaries:
                 print("\n--- Frequência da Distribuição Moldura/Miolo ---")
                 print(prop_summaries['moldura_miolo'].to_string())
                 if should_plot:
-                    plot_distribution_bar(prop_summaries['moldura_miolo'],
-                                          "Distribuição Moldura/Miolo",
-                                          "dist_moldura_miolo")
+                    plot_distribution_bar(prop_summaries['moldura_miolo'], "Distribuição Moldura/Miolo", "dist_moldura_miolo")
         else:
             logger.error("Falha ao analisar as propriedades dos números.")
         logger.info("Análise de propriedades concluída.")
@@ -222,65 +230,30 @@ def run_pipeline(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
-    # Configuração do argparse - GARANTINDO TODAS AS DEFINIÇÕES
+    # Configuração do argparse COMPLETA
     parser = argparse.ArgumentParser(
         description="Analisa dados históricos da Lotofácil.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
 
-    # Argumento --reload
-    parser.add_argument(
-        '--reload',
-        action='store_true',
-        help="Força o recarregamento dos dados a partir do arquivo Excel, substituindo os dados no banco."
-    )
-    # Argumento --max-concurso
-    parser.add_argument(
-        '--max-concurso',
-        type=int,
-        default=None,
-        metavar='NUMERO',
-        help="Número máximo do concurso a ser considerado nas análises."
-    )
-    # Argumento --analysis
+    parser.add_argument('--reload', action='store_true', help="Força recarga do Excel.")
+    parser.add_argument('--max-concurso', type=int, default=None, metavar='NUMERO', help="Concurso máximo para análise.")
     parser.add_argument(
         '--analysis',
         nargs='+',
-        choices=['freq', 'pair', 'comb', 'cycle', 'delay', 'props', 'all'],
+        choices=['freq', 'pair', 'comb', 'cycle', 'cycle-stats', 'delay', 'props', 'all'], # Adicionado 'cycle-stats'
         default=['all'],
         metavar='TIPO',
-        help="Análises a executar (freq, pair, comb, cycle, delay, props, all)."
+        help="Análises a executar."
     )
-    # Argumento --top-n
-    parser.add_argument(
-        '--top-n',
-        type=int,
-        default=15,
-        metavar='N',
-        help="Número de resultados a exibir nas listas de top pares/combinações."
-    )
-    # Argumento --windows
-    parser.add_argument(
-        '--windows',
-        type=str,
-        default='10,25,50',
-        metavar='W1,W2,...',
-        help="Tamanhos das janelas para análise de frequência, separados por vírgula."
-    )
-    # Argumento --plot
-    parser.add_argument(
-        '--plot',
-        action='store_true',
-        help="Gera e salva gráficos para as análises executadas (requer matplotlib/seaborn)."
-    )
+    parser.add_argument('--top-n', type=int, default=15, metavar='N', help="Top N para pares/combinações.")
+    parser.add_argument('--windows', type=str, default='10,25,50', metavar='W1,W2,...', help="Janelas de frequência.")
+    parser.add_argument('--plot', action='store_true', help="Gera gráficos (requer matplotlib/seaborn).")
 
-    # Parseia os argumentos
     args = parser.parse_args()
 
-    # Verifica se o plot é solicitado mas não é possível
     if args.plot and not PLOTTING_ENABLED:
-        logger.error("A opção --plot foi solicitada, mas as bibliotecas matplotlib/seaborn não foram encontradas. Instale-as com 'pip install matplotlib seaborn'")
-        # Decide se quer parar ou apenas continuar sem plotar. Vamos continuar sem plotar.
+        logger.error("Opção --plot solicitada, mas matplotlib/seaborn não encontradas.")
+        # Continua sem plotar
 
-    # Chama a função principal
     run_pipeline(args)
