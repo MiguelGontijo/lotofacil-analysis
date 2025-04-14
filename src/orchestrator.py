@@ -2,32 +2,28 @@
 
 import argparse
 import logging
-import pandas as pd # Ainda necessário para Optional[pd.DataFrame] no type hint
+import pandas as pd
 from typing import Optional
 
 # Importações de configuração e DATA HANDLING
-from src.config import logger, TABLE_NAME, DATABASE_PATH
+from src.config import logger
 from src.data_loader import load_and_clean_data
 from src.database_manager import save_to_db, read_data_from_db
 
-# Importa as FUNÇÕES DE EXECUÇÃO do novo módulo
-from src.pipeline_steps import (
-    execute_frequency_analysis,
-    execute_pair_analysis,
-    execute_combination_analysis,
-    execute_cycle_identification,
-    display_cycle_summary,
-    execute_cycle_stats_analysis,
-    execute_delay_analysis,
-    execute_max_delay_analysis,
-    execute_properties_analysis
-)
+# Importa as FUNÇÕES DE EXECUÇÃO dos módulos específicos
+from src.pipeline_steps.execute_frequency import execute_frequency_analysis
+from src.pipeline_steps.execute_pairs import execute_pair_analysis
+from src.pipeline_steps.execute_combinations import execute_combination_analysis
+from src.pipeline_steps.execute_cycles import execute_cycle_identification, display_cycle_summary
+from src.pipeline_steps.execute_cycle_stats import execute_cycle_stats_analysis
+from src.pipeline_steps.execute_delay import execute_delay_analysis
+from src.pipeline_steps.execute_max_delay import execute_max_delay_analysis
+from src.pipeline_steps.execute_properties import execute_properties_analysis
 
-# Verifica se plotagem está disponível (não precisa mais importar plotters aqui)
+# Verifica se plotagem está disponível
 try:
-    # Importar algo do plotter só para verificar a instalação
     from src.visualization.plotter import setup_plotting
-    setup_plotting() # Configura plots se disponível
+    setup_plotting()
     PLOTTING_ENABLED = True
 except ImportError as e:
     logger.warning(f"Libs de plotagem não encontradas: {e}. Opção --plot ignorada.")
@@ -43,6 +39,7 @@ class AnalysisOrchestrator:
         self.logger = logger
         self.args = self._setup_parser().parse_args()
         self.plotting_available = PLOTTING_ENABLED
+        # Define should_plot uma vez baseado nos args e disponibilidade
         self.should_plot = self.args.plot and self.plotting_available
         if self.args.plot and not self.plotting_available:
              self.logger.error("Opção --plot solicitada, mas libs não encontradas.")
@@ -68,12 +65,11 @@ class AnalysisOrchestrator:
 
     def _load_or_check_data(self) -> bool:
         """ Lida com a carga de dados ou verificação do BD. """
-        # (Código idêntico ao anterior)
         if self.args.reload:
             cleaned_data = load_and_clean_data()
             if cleaned_data is None: return False
             if not save_to_db(df=cleaned_data, if_exists='replace'): return False
-            self.logger.info(f"Dados salvos no BD: {DATABASE_PATH}")
+            self.logger.info(f"Dados salvos no BD.")
         else:
             test_read = read_data_from_db(columns=['concurso'], concurso_maximo=1)
             if test_read is None or test_read.empty:
@@ -86,7 +82,7 @@ class AnalysisOrchestrator:
 
     def run(self):
         """ Executa o pipeline principal de análises. """
-        self.logger.info("Iniciando a aplicação Lotofacil Analysis - Orquestrador v2")
+        self.logger.info("Iniciando a aplicação Lotofacil Analysis - Orquestrador v3 (Steps Modulares)")
 
         if not self._load_or_check_data():
             self.logger.error("Pré-requisitos de dados não atendidos. Encerrando.")
@@ -103,7 +99,7 @@ class AnalysisOrchestrator:
         run_max_delay = run_all or 'max-delay' in self.args.analysis
         run_props = run_all or 'props' in self.args.analysis
 
-        # Chama as funções de execução do pipeline_steps
+        # Chama as funções de execução dos módulos de steps
         if run_freq: execute_frequency_analysis(self.args, self.should_plot)
         if run_pair: execute_pair_analysis(self.args)
         if run_comb: execute_combination_analysis(self.args)
