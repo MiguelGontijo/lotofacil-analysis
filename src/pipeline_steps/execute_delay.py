@@ -22,9 +22,13 @@ def execute_delay_analysis(args: argparse.Namespace, should_plot: bool):
 
     if current_delays_series is not None:
         print("\n--- Atraso Atual das Dezenas ---")
-        print(current_delays_series.to_string())
-        if plot_flag:
-            plot_delay_bar(current_delays_series, f"Atraso Atual (Ref: {max_c or 'Último'})", "barras_atraso_atual")
+        # Verifica se a Series não está vazia antes de imprimir
+        if not current_delays_series.empty:
+            print(current_delays_series.to_string())
+            if plot_flag:
+                plot_delay_bar(current_delays_series, f"Atraso Atual (Ref: {max_c or 'Último'})", "barras_atraso_atual")
+        else:
+            logger.warning("Série de atraso atual calculada está vazia.")
     else:
          logger.error("Falha ao calcular o atraso atual.")
     logger.info("Análise de atraso atual concluída.")

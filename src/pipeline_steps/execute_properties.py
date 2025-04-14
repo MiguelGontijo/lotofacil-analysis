@@ -24,18 +24,22 @@ def execute_properties_analysis(args: argparse.Namespace, should_plot: bool):
         # Recebe o dicionário com as sumarizações (value_counts)
         prop_summaries = summarize_properties(properties_df)
 
+        # Itera sobre os resultados sumarizados e os exibe/plota
         for key, series in prop_summaries.items():
-            # Constrói o título para exibição
             title = key.replace('_', ' ').replace('par impar', 'Pares/Ímpares').replace('moldura miolo', 'Moldura/Miolo').title()
             print(f"\n--- Frequência {title} ---")
-            print(series.to_string()) # Imprime a sumarização
-            if plot_flag:
-                # Plota a sumarização
-                plot_distribution_bar(series, title, f"dist_{key}")
+            if series is not None and not series.empty:
+                print(series.to_string()) # Imprime a sumarização
+                if plot_flag:
+                    # Plota a sumarização
+                    plot_distribution_bar(series, title, f"dist_{key}")
+            else:
+                 logger.warning(f"Sumarização para '{key}' está vazia.")
 
         # Opcional: Exibir o DataFrame detalhado (pode ser muito grande)
+        # logger.debug("Exibindo detalhes das propriedades (últimos 5)...")
         # print("\n--- Detalhes das Propriedades (Últimos 5 Concursos) ---")
         # print(properties_df.tail().to_string(index=False))
     else:
-         logger.error("Falha ao analisar as propriedades dos números ou nenhum dado retornado.")
+         logger.warning("Falha ao analisar as propriedades ou nenhum dado retornado.")
     logger.info("Análise de propriedades concluída.")

@@ -51,7 +51,8 @@ def execute_frequency_analysis(args: argparse.Namespace, should_plot: bool):
     cumulative_hist_df = calculate_cumulative_frequency_history(concurso_maximo=max_c)
     if cumulative_hist_df is not None:
         print("\n--- Histórico de Frequência Acumulada (Últimos 5 Registros) ---")
-        print(cumulative_hist_df.tail().to_string()) # Usar to_string para melhor controle
+        # Usar to_string para formatar melhor DataFrames grandes no console
+        print(cumulative_hist_df.tail().to_string(index=False))
     else:
         logger.warning("Não foi possível calcular a frequência acumulada.")
 

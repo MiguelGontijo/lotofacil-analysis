@@ -21,9 +21,13 @@ def execute_max_delay_analysis(args: argparse.Namespace, should_plot: bool):
 
     if max_delays_series is not None:
         print("\n--- Atraso Máximo Histórico das Dezenas ---")
-        print(max_delays_series.to_string())
-        if plot_flag:
-             plot_delay_bar(max_delays_series, f"Atraso Máximo Histórico (até {max_c or 'Último'})", "barras_atraso_maximo")
+        # Verifica se a Series não está vazia antes de imprimir
+        if not max_delays_series.empty:
+            print(max_delays_series.to_string())
+            if plot_flag:
+                 plot_delay_bar(max_delays_series, f"Atraso Máximo Histórico (até {max_c or 'Último'})", "barras_atraso_maximo")
+        else:
+            logger.warning("Série de atraso máximo calculada está vazia.")
     else:
          logger.error("Falha ao calcular o atraso máximo histórico.")
     logger.info("Análise de atraso máximo concluída.")

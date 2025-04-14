@@ -5,33 +5,36 @@ import pandas as pd
 from typing import Optional
 
 from src.config import logger
-from src.analysis.cycle_analysis import identify_cycles # Importa apenas a identificação
+# Importa apenas a função de identificação que retorna o DF
+from src.analysis.cycle_analysis import identify_cycles
 try:
+    # Importa a função de plotagem
     from src.visualization.plotter import plot_cycle_duration_hist
     PLOTTING_ENABLED_STEP = True
 except ImportError:
     PLOTTING_ENABLED_STEP = False
 
-# Função que era parte do orchestrator agora está aqui
+# Função para executar a identificação
 def execute_cycle_identification() -> Optional[pd.DataFrame]:
     """ Executa a identificação de ciclos e retorna o DataFrame. """
     logger.info(f"Executando identificação de ciclos...")
-    cycles_summary = identify_cycles() # Chama a função de análise que retorna o DF
+    cycles_summary = identify_cycles() # Chama a função de análise
     if cycles_summary is None:
         logger.error("Falha na identificação de ciclos.")
     elif cycles_summary.empty:
         logger.info("Nenhum ciclo completo identificado.")
     else:
-        logger.info("Identificação de ciclos concluída.")
+        logger.info(f"Identificação de ciclos concluída ({len(cycles_summary)} ciclos).")
     return cycles_summary # Retorna o DF (ou None/vazio)
 
-# Função que era parte do orchestrator agora está aqui
+# Função para exibir o sumário e plotar
 def display_cycle_summary(cycles_summary: pd.DataFrame, args: argparse.Namespace, should_plot: bool):
     """ Exibe o resumo e estatísticas dos ciclos. """
     max_c = args.max_concurso
     plot_flag = should_plot and PLOTTING_ENABLED_STEP
 
-    if not cycles_summary.empty:
+    # Verifica se o DataFrame não é None e não está vazio
+    if cycles_summary is not None and not cycles_summary.empty:
         # Filtra se necessário
         cycles_filtered = cycles_summary[cycles_summary['concurso_fim'] <= max_c].copy() if max_c else cycles_summary
 
@@ -40,7 +43,6 @@ def display_cycle_summary(cycles_summary: pd.DataFrame, args: argparse.Namespace
             print(cycles_filtered.to_string(index=False))
             # Calcula e imprime estatísticas
             try:
-                # Usar dropna() para o caso de haver apenas um ciclo (std seria NaN)
                 stats = cycles_filtered['duracao'].agg(['mean', 'min', 'max']).dropna()
                 mean_str = f"{stats.get('mean', 'N/A'):.2f}" if 'mean' in stats else "N/A"
                 min_str = f"{stats.get('min', 'N/A'):.0f}" if 'min' in stats else "N/A"
@@ -54,5 +56,5 @@ def display_cycle_summary(cycles_summary: pd.DataFrame, args: argparse.Namespace
                 plot_cycle_duration_hist(cycles_filtered, "Duração dos Ciclos", "hist_duracao_ciclos")
         else:
             logger.info(f"Nenhum ciclo completo encontrado até o concurso {max_c}.")
-    # else: # O log já foi feito em execute_cycle_identification se vazio
+    # else: # Log já feito em execute_cycle_identification
     #     logger.info("Nenhum ciclo completo identificado nos dados (DataFrame vazio).")
