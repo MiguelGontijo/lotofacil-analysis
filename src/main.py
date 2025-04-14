@@ -15,6 +15,8 @@ from src.analysis.combination_analysis import calculate_combination_frequency
 from src.analysis.cycle_analysis import identify_cycles
 # Importa a nova função de análise de atrasos
 from src.analysis.delay_analysis import calculate_current_delay
+# Importa as novas funções de análise de propriedades
+from src.analysis.number_properties_analysis import analyze_number_properties, summarize_properties
 
 
 pd.set_option('display.max_rows', 100)
@@ -56,6 +58,7 @@ def run_pipeline(args: argparse.Namespace):
     run_comb = run_all or 'comb' in args.analysis
     run_cycle = run_all or 'cycle' in args.analysis
     run_delay = run_all or 'delay' in args.analysis # Flag para atraso
+    run_props = run_all or 'props' in args.analysis # Nova flag para propriedades
 
     # --- Passo 3: Análises de Frequência ---
     if run_freq:
@@ -151,7 +154,6 @@ def run_pipeline(args: argparse.Namespace):
         logger.info("Análise de ciclos concluída.")
 
 
-    # *** BLOCO ADICIONADO AQUI ***
     # --- Passo 8: Análise de Atrasos ---
     if run_delay:
         logger.info(f"Iniciando análise de atraso atual (até concurso {max_concurso or 'último'})...")
@@ -167,6 +169,36 @@ def run_pipeline(args: argparse.Namespace):
         logger.info("Análise de atraso atual concluída.")
 
 
+    # --- Passo 9: Análise de Propriedades dos Números ---
+    if run_props:
+        logger.info(f"Iniciando análise de propriedades dos números (até concurso {max_concurso or 'último'})...")
+        properties_df = analyze_number_properties(concurso_maximo=max_concurso)
+
+        if properties_df is not None and not properties_df.empty:
+            # Calcula e exibe as estatísticas resumidas
+            prop_summaries = summarize_properties(properties_df)
+
+            if 'par_impar' in prop_summaries:
+                print("\n--- Frequência da Distribuição Pares/Ímpares ---")
+                print(prop_summaries['par_impar'].to_string())
+
+            if 'primos' in prop_summaries:
+                print("\n--- Frequência da Quantidade de Números Primos ---")
+                print(prop_summaries['primos'].to_string())
+
+            if 'moldura_miolo' in prop_summaries:
+                print("\n--- Frequência da Distribuição Moldura/Miolo ---")
+                print(prop_summaries['moldura_miolo'].to_string())
+
+            # Opcional: Mostrar as últimas linhas do DataFrame com as contagens por concurso
+            # print("\n--- Detalhes das Propriedades (Últimos 5 Concursos) ---")
+            # print(properties_df.tail().to_string(index=False))
+
+        else:
+            logger.error("Falha ao analisar as propriedades dos números.")
+        logger.info("Análise de propriedades concluída.")
+
+    # --- Passo 10: Finalização ---
     logger.info("Aplicação Lotofacil Analysis finalizada.")
 
 
@@ -192,10 +224,10 @@ if __name__ == "__main__":
     parser.add_argument(
         '--analysis',
         nargs='+',
-        choices=['freq', 'pair', 'comb', 'cycle', 'delay', 'all'], # Inclui 'delay'
+        choices=['freq', 'pair', 'comb', 'cycle', 'delay', 'props', 'all'],
         default=['all'], # Padrão é 'all'
         metavar='TIPO',
-        help="Análises a executar (freq, pair, comb, cycle, delay, all)."
+        help="Análises a executar (freq, pair, comb, cycle, delay, props, all)."
     )
     parser.add_argument(
         '--top-n',
