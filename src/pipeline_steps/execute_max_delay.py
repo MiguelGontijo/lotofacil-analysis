@@ -1,6 +1,7 @@
 # src/pipeline_steps/execute_max_delay.py
 
 import argparse
+import pandas as pd # Para checar None
 from src.config import logger
 from src.analysis.delay_analysis import calculate_max_delay
 try:
@@ -15,12 +16,14 @@ def execute_max_delay_analysis(args: argparse.Namespace, should_plot: bool):
     max_c = args.max_concurso
     plot_flag = should_plot and PLOTTING_ENABLED_STEP
 
-    max_delays = calculate_max_delay(concurso_maximo=max_c)
-    if max_delays is not None:
+    # Recebe a Series de atrasos máximos
+    max_delays_series = calculate_max_delay(concurso_maximo=max_c)
+
+    if max_delays_series is not None:
         print("\n--- Atraso Máximo Histórico das Dezenas ---")
-        print(max_delays.to_string())
+        print(max_delays_series.to_string())
         if plot_flag:
-             plot_delay_bar(max_delays, f"Atraso Máximo Histórico (até {max_c or 'Último'})", "barras_atraso_maximo")
+             plot_delay_bar(max_delays_series, f"Atraso Máximo Histórico (até {max_c or 'Último'})", "barras_atraso_maximo")
     else:
          logger.error("Falha ao calcular o atraso máximo histórico.")
     logger.info("Análise de atraso máximo concluída.")

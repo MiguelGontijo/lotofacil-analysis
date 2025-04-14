@@ -1,7 +1,7 @@
 # src/pipeline_steps/execute_frequency.py
 
 import argparse
-import pandas as pd
+import pandas as pd # Necessário para checar tipo
 
 from src.config import logger
 from src.analysis.frequency_analysis import (
@@ -21,27 +21,38 @@ def execute_frequency_analysis(args: argparse.Namespace, should_plot: bool):
     max_c = args.max_concurso
     plot_flag = should_plot and PLOTTING_ENABLED_STEP
 
-    overall_freq = calculate_period_frequency(concurso_maximo=max_c)
-    if overall_freq is not None:
+    # --- Frequência Geral ---
+    overall_freq_series = calculate_period_frequency(concurso_maximo=max_c)
+    if overall_freq_series is not None:
         print("\n--- Frequência Geral das Dezenas ---")
-        print(overall_freq.to_string())
+        print(overall_freq_series.to_string())
         if plot_flag:
-            plot_frequency_bar(overall_freq, "Frequência Geral", "freq_geral")
+            plot_frequency_bar(overall_freq_series, "Frequência Geral", "freq_geral")
+    else:
+        logger.warning("Não foi possível calcular a frequência geral.")
 
+    # --- Frequência por Janela ---
     try:
         window_sizes = [int(w.strip()) for w in args.windows.split(',') if w.strip()]
     except ValueError:
         logger.error(f"Formato inválido para --windows: '{args.windows}'.")
         window_sizes = []
-    for window in window_sizes:
-        window_freq = calculate_windowed_frequency(window_size=window, concurso_maximo=max_c)
-        if window_freq is not None:
-            print(f"\n--- Frequência nos Últimos {window} Concursos ---")
-            print(window_freq.to_string())
-            # if plot_flag: plot_frequency_bar(window_freq, f"Freq. Últimos {window}", f"freq_{window}")
 
-    cumulative_hist = calculate_cumulative_frequency_history(concurso_maximo=max_c)
-    if cumulative_hist is not None:
+    for window in window_sizes:
+        window_freq_series = calculate_windowed_frequency(window_size=window, concurso_maximo=max_c)
+        if window_freq_series is not None:
+            print(f"\n--- Frequência nos Últimos {window} Concursos ---")
+            print(window_freq_series.to_string())
+            # if plot_flag: plot_frequency_bar(window_freq_series, f"Freq. Últimos {window}", f"freq_{window}")
+        else:
+            logger.warning(f"Não foi possível calcular frequência para janela de {window}.")
+
+    # --- Frequência Acumulada ---
+    cumulative_hist_df = calculate_cumulative_frequency_history(concurso_maximo=max_c)
+    if cumulative_hist_df is not None:
         print("\n--- Histórico de Frequência Acumulada (Últimos 5 Registros) ---")
-        print(cumulative_hist.tail())
+        print(cumulative_hist_df.tail().to_string()) # Usar to_string para melhor controle
+    else:
+        logger.warning("Não foi possível calcular a frequência acumulada.")
+
     logger.info("Análises de frequência concluídas.")

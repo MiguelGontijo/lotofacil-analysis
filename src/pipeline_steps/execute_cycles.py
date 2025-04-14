@@ -5,23 +5,27 @@ import pandas as pd
 from typing import Optional
 
 from src.config import logger
-from src.analysis.cycle_analysis import identify_cycles
+from src.analysis.cycle_analysis import identify_cycles # Importa apenas a identificação
 try:
     from src.visualization.plotter import plot_cycle_duration_hist
     PLOTTING_ENABLED_STEP = True
 except ImportError:
     PLOTTING_ENABLED_STEP = False
 
+# Função que era parte do orchestrator agora está aqui
 def execute_cycle_identification() -> Optional[pd.DataFrame]:
     """ Executa a identificação de ciclos e retorna o DataFrame. """
     logger.info(f"Executando identificação de ciclos...")
-    cycles_summary = identify_cycles()
+    cycles_summary = identify_cycles() # Chama a função de análise que retorna o DF
     if cycles_summary is None:
         logger.error("Falha na identificação de ciclos.")
+    elif cycles_summary.empty:
+        logger.info("Nenhum ciclo completo identificado.")
     else:
         logger.info("Identificação de ciclos concluída.")
-    return cycles_summary
+    return cycles_summary # Retorna o DF (ou None/vazio)
 
+# Função que era parte do orchestrator agora está aqui
 def display_cycle_summary(cycles_summary: pd.DataFrame, args: argparse.Namespace, should_plot: bool):
     """ Exibe o resumo e estatísticas dos ciclos. """
     max_c = args.max_concurso
@@ -35,12 +39,20 @@ def display_cycle_summary(cycles_summary: pd.DataFrame, args: argparse.Namespace
             print("\n--- Resumo dos Ciclos Completos ---")
             print(cycles_filtered.to_string(index=False))
             # Calcula e imprime estatísticas
-            stats = cycles_filtered['duracao'].agg(['mean', 'min', 'max'])
-            print(f"\nStats Ciclos (até {max_c or 'último'}): {len(cycles_filtered)} ciclos, Média {stats['mean']:.2f}, Min {stats['min']}, Max {stats['max']}")
+            try:
+                # Usar dropna() para o caso de haver apenas um ciclo (std seria NaN)
+                stats = cycles_filtered['duracao'].agg(['mean', 'min', 'max']).dropna()
+                mean_str = f"{stats.get('mean', 'N/A'):.2f}" if 'mean' in stats else "N/A"
+                min_str = f"{stats.get('min', 'N/A'):.0f}" if 'min' in stats else "N/A"
+                max_str = f"{stats.get('max', 'N/A'):.0f}" if 'max' in stats else "N/A"
+                print(f"\nStats Ciclos (até {max_c or 'último'}): {len(cycles_filtered)} ciclos, Média {mean_str}, Min {min_str}, Max {max_str}")
+            except Exception as e:
+                logger.error(f"Erro ao calcular estatísticas dos ciclos: {e}")
+
             # Plota o histograma
             if plot_flag:
                 plot_cycle_duration_hist(cycles_filtered, "Duração dos Ciclos", "hist_duracao_ciclos")
         else:
             logger.info(f"Nenhum ciclo completo encontrado até o concurso {max_c}.")
-    else:
-        logger.info("Nenhum ciclo completo identificado nos dados (DataFrame vazio).")
+    # else: # O log já foi feito em execute_cycle_identification se vazio
+    #     logger.info("Nenhum ciclo completo identificado nos dados (DataFrame vazio).")

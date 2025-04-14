@@ -39,7 +39,6 @@ class AnalysisOrchestrator:
         self.logger = logger
         self.args = self._setup_parser().parse_args()
         self.plotting_available = PLOTTING_ENABLED
-        # Define should_plot uma vez baseado nos args e disponibilidade
         self.should_plot = self.args.plot and self.plotting_available
         if self.args.plot and not self.plotting_available:
              self.logger.error("Opção --plot solicitada, mas libs não encontradas.")
@@ -50,7 +49,6 @@ class AnalysisOrchestrator:
             description="Analisa dados históricos da Lotofácil.",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
-        # Definições dos argumentos (idênticas às anteriores)
         parser.add_argument('--reload', action='store_true', help="Força recarga do Excel.")
         parser.add_argument('--max-concurso', type=int, default=None, metavar='NUMERO', help="Concurso máximo para análise.")
         parser.add_argument(
@@ -78,17 +76,14 @@ class AnalysisOrchestrator:
             self.logger.info("Dados do BD acessíveis.")
         return True
 
-    # --- Método Principal de Execução (Agora chama funções externas) ---
-
+    # --- Método Principal de Execução ---
     def run(self):
         """ Executa o pipeline principal de análises. """
-        self.logger.info("Iniciando a aplicação Lotofacil Analysis - Orquestrador v3 (Steps Modulares)")
-
+        self.logger.info("Iniciando a aplicação Lotofacil Analysis - Orquestrador v3")
         if not self._load_or_check_data():
             self.logger.error("Pré-requisitos de dados não atendidos. Encerrando.")
             return
 
-        # Determina quais análises rodar
         run_all = 'all' in self.args.analysis
         run_freq = run_all or 'freq' in self.args.analysis
         run_pair = run_all or 'pair' in self.args.analysis
@@ -99,23 +94,21 @@ class AnalysisOrchestrator:
         run_max_delay = run_all or 'max-delay' in self.args.analysis
         run_props = run_all or 'props' in self.args.analysis
 
-        # Chama as funções de execução dos módulos de steps
         if run_freq: execute_frequency_analysis(self.args, self.should_plot)
         if run_pair: execute_pair_analysis(self.args)
         if run_comb: execute_combination_analysis(self.args)
 
         cycles_summary = None
         if run_cycle or run_cycle_stats:
-            cycles_summary = execute_cycle_identification() # Identifica
+            cycles_summary = execute_cycle_identification()
 
         if run_cycle and cycles_summary is not None:
-             display_cycle_summary(cycles_summary, self.args, self.should_plot) # Exibe
+             display_cycle_summary(cycles_summary, self.args, self.should_plot)
 
         if run_cycle_stats and cycles_summary is not None:
-             execute_cycle_stats_analysis(cycles_summary) # Analisa dentro
+             execute_cycle_stats_analysis(cycles_summary)
         elif run_cycle_stats and cycles_summary is None:
              self.logger.error("Não foi possível executar 'cycle-stats'.")
-
 
         if run_delay: execute_delay_analysis(self.args, self.should_plot)
         if run_max_delay: execute_max_delay_analysis(self.args, self.should_plot)

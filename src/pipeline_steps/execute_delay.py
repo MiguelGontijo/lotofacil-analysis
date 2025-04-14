@@ -1,6 +1,7 @@
 # src/pipeline_steps/execute_delay.py
 
 import argparse
+import pandas as pd # Para checar None
 from src.config import logger
 from src.analysis.delay_analysis import calculate_current_delay
 try:
@@ -16,12 +17,14 @@ def execute_delay_analysis(args: argparse.Namespace, should_plot: bool):
     max_c = args.max_concurso
     plot_flag = should_plot and PLOTTING_ENABLED_STEP
 
-    current_delays = calculate_current_delay(concurso_maximo=max_c)
-    if current_delays is not None:
+    # Recebe a Series de atrasos
+    current_delays_series = calculate_current_delay(concurso_maximo=max_c)
+
+    if current_delays_series is not None:
         print("\n--- Atraso Atual das Dezenas ---")
-        print(current_delays.to_string())
+        print(current_delays_series.to_string())
         if plot_flag:
-            plot_delay_bar(current_delays, f"Atraso Atual (Ref: {max_c or 'Último'})", "barras_atraso_atual")
+            plot_delay_bar(current_delays_series, f"Atraso Atual (Ref: {max_c or 'Último'})", "barras_atraso_atual")
     else:
          logger.error("Falha ao calcular o atraso atual.")
     logger.info("Análise de atraso atual concluída.")
