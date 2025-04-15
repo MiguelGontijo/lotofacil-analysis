@@ -9,31 +9,26 @@ import sys
 
 # Importa do config
 from src.config import (
-    DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME, FREQ_SNAP_TABLE_NAME, # <<< Usa novas constantes
+    DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME, FREQ_SNAP_TABLE_NAME,
     logger, NEW_BALL_COLUMNS, ALL_NUMBERS
 )
 
-# Fallback (embora devam vir do config)
+# Fallback
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
-if 'NEW_BALL_COLUMNS' not in globals(): NEW_BALL_COLUMNS = [f'b{i}' for i in range(1,16)]
-if 'TABLE_NAME' not in globals(): TABLE_NAME = 'sorteios'
-if 'CYCLES_TABLE_NAME' not in globals(): CYCLES_TABLE_NAME = 'ciclos'
-if 'FREQ_SNAP_TABLE_NAME' not in globals(): FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
 
 
 # --- Funções save_to_db, read_data_from_db, get_draw_numbers ---
+# (Código completo e correto das versões anteriores)
 def save_to_db(df: pd.DataFrame, table_name: str, db_path: Path = DATABASE_PATH, if_exists: str = 'replace') -> bool:
-    # (Código completo da versão anterior - SEM índice automático)
-    logger.info(f"Salvando dados na tabela '{table_name}' (if_exists='{if_exists}')...")
+    logger.info(f"Salvando dados '{table_name}' (if_exists='{if_exists}')...")
     if df is None or df.empty: logger.warning(f"DataFrame '{table_name}' vazio."); return False
     try:
         with sqlite3.connect(db_path) as conn: df.to_sql(name=table_name, con=conn, if_exists=if_exists, index=False)
         logger.info(f"{len(df)} registros salvos em '{table_name}'.")
         return True
-    except Exception as e: logger.error(f"Erro ao salvar em '{table_name}': {e}"); return False
+    except Exception as e: logger.error(f"Erro salvar '{table_name}': {e}"); return False
 
 def read_data_from_db(db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAME, columns: Optional[List[str]] = None, concurso_minimo: Optional[int] = None, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
-    # (Código completo da versão anterior)
     log_msg = f"Lendo '{table_name}'"; conditions = []; params = []
     if concurso_minimo is not None: conditions.append("concurso >= ?"); params.append(concurso_minimo); log_msg += f" >= {concurso_minimo}"
     if concurso_maximo is not None: conditions.append("concurso <= ?"); params.append(concurso_maximo); log_msg += f" <= {concurso_maximo}"
@@ -53,7 +48,6 @@ def read_data_from_db(db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAM
     except Exception as e: logger.error(f"Erro ao ler '{table_name}': {e}"); return None
 
 def get_draw_numbers(concurso: int, db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAME) -> Optional[Set[int]]:
-    # (Código completo da versão anterior)
     logger.debug(f"Buscando dezenas concurso {concurso}...")
     try:
         with sqlite3.connect(db_path) as conn:
@@ -68,25 +62,22 @@ def get_draw_numbers(concurso: int, db_path: Path = DATABASE_PATH, table_name: s
 
 # --- Funções de Ciclo ---
 def create_cycles_table(db_path: Path = DATABASE_PATH):
-    # (Código completo da versão anterior)
     try:
         with sqlite3.connect(db_path) as conn: sql_create = f"""CREATE TABLE IF NOT EXISTS {CYCLES_TABLE_NAME} (numero_ciclo INTEGER PRIMARY KEY, concurso_inicio INTEGER NOT NULL, concurso_fim INTEGER NOT NULL UNIQUE, duracao INTEGER NOT NULL);"""; conn.execute(sql_create); logger.info(f"Tabela '{CYCLES_TABLE_NAME}' verificada/criada.")
     except sqlite3.Error as e: logger.error(f"Erro criar/verificar '{CYCLES_TABLE_NAME}': {e}")
-
 def get_last_cycle_end(db_path: Path = DATABASE_PATH) -> Optional[int]:
-    # (Código completo da versão anterior)
     create_cycles_table(db_path); cycles_table_name = CYCLES_TABLE_NAME
     try:
         with sqlite3.connect(db_path) as conn: result = conn.execute(f"SELECT MAX(concurso_fim) FROM {cycles_table_name}").fetchone(); return int(result[0]) if result and result[0] is not None else None
     except sqlite3.Error as e: logger.error(f"Erro buscar último fim de ciclo: {e}"); return None
 
-
-# --- FUNÇÕES PARA SNAPSHOTS DE FREQUÊNCIA (Já corrigidas na resposta anterior) ---
+# --- FUNÇÕES PARA SNAPSHOTS DE FREQUÊNCIA (Corrigidas) ---
 def create_freq_snap_table(db_path: Path = DATABASE_PATH):
     """ Cria a tabela 'freq_geral_snap' se ela não existir. """
     try:
         with sqlite3.connect(db_path) as conn:
-            col_defs = ', '.join([f'd{i} INTEGER NOT NULL' for i in ALL_NUMBERS]) # Usa ALL_NUMBERS do config
+            # Usa ALL_NUMBERS do config
+            col_defs = ', '.join([f'd{i} INTEGER NOT NULL' for i in ALL_NUMBERS])
             sql_create = f"""CREATE TABLE IF NOT EXISTS {FREQ_SNAP_TABLE_NAME} (concurso_snap INTEGER PRIMARY KEY, {col_defs});"""
             conn.execute(sql_create)
             logger.info(f"Tabela '{FREQ_SNAP_TABLE_NAME}' verificada/criada.")
@@ -105,20 +96,20 @@ def get_closest_freq_snapshot(concurso: int, db_path: Path = DATABASE_PATH) -> O
     logger.debug(f"Buscando snapshot freq <= {concurso}...")
     try:
         with sqlite3.connect(db_path) as conn:
-            col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS] # Usa ALL_NUMBERS do config
-            col_names_str = ', '.join(f'"{col}"' for col in col_names)
+            # Usa ALL_NUMBERS do config
+            col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS]; col_names_str = ', '.join(f'"{col}"' for col in col_names)
             sql = f"SELECT {col_names_str} FROM {FREQ_SNAP_TABLE_NAME} WHERE concurso_snap <= ? ORDER BY concurso_snap DESC LIMIT 1;"
             result = conn.execute(sql, (concurso,)).fetchone()
             if result:
                 snap_concurso = int(result[0]); freq_data = {}
                 for i, count_val in enumerate(result[1:]):
                     dezena = ALL_NUMBERS[i] # Usa ALL_NUMBERS do config
-                    try: # Conversão robusta
+                    try: # Conversão robusta (igual versão anterior correta)
                         if isinstance(count_val, int): freq_data[dezena] = count_val
-                        elif isinstance(count_val, bytes): freq_data[dezena] = int.from_bytes(count_val, byteorder=sys.byteorder, signed=False)
+                        elif isinstance(count_val, bytes): freq_data[dezena] = int.from_bytes(count_val, byteorder=sys.byteorder, signed=False); logger.warning(f"d{dezena} snap {snap_concurso} lido como bytes.")
                         elif count_val is None or pd.isna(count_val): freq_data[dezena] = 0
                         else: freq_data[dezena] = int(count_val)
-                    except (ValueError, TypeError, OverflowError) as e: logger.error(f"Erro converter valor snap d{dezena}, c={snap_concurso}: {e}. Usando 0."); freq_data[dezena] = 0
+                    except Exception as e: logger.error(f"Erro converter snap d{dezena}, c={snap_concurso}: {e}. Usando 0."); freq_data[dezena] = 0
                 freq_series = pd.Series(freq_data, name=f'FreqSnap_{snap_concurso}').sort_index().reindex(ALL_NUMBERS, fill_value=0).astype(int)
                 logger.debug(f"Snapshot encontrado: Concurso {snap_concurso}")
                 return snap_concurso, freq_series
@@ -128,13 +119,12 @@ def get_closest_freq_snapshot(concurso: int, db_path: Path = DATABASE_PATH) -> O
 def save_freq_snapshot(concurso_snap: int, freq_series: pd.Series, db_path: Path = DATABASE_PATH):
     """ Salva (ou atualiza) um snapshot de frequência no banco. """
     create_freq_snap_table(db_path)
-    # Usa ALL_NUMBERS do config
     if freq_series is None or len(freq_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série freq inválida p/ snap {concurso_snap}."); return
     logger.debug(f"Salvando snapshot freq c={concurso_snap}...")
     try:
         with sqlite3.connect(db_path) as conn:
             col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS]; placeholders = ', '.join(['?'] * (len(ALL_NUMBERS) + 1))
-            values_ordered = [freq_series.get(i, 0) for i in ALL_NUMBERS]
+            values_ordered = [freq_series.get(i, 0) for i in ALL_NUMBERS] # Garante ordem e default 0
             sql_insert_replace = f"INSERT OR REPLACE INTO {FREQ_SNAP_TABLE_NAME} ({', '.join(col_names)}) VALUES ({placeholders});"
             values_to_insert = [concurso_snap] + values_ordered
             conn.execute(sql_insert_replace, values_to_insert); conn.commit()

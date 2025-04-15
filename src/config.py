@@ -18,9 +18,9 @@ DATABASE_PATH = PROJECT_ROOT / DATABASE_NAME
 PLOT_DIR = PROJECT_ROOT / 'plots'
 
 # --- Configurações de Tabelas BD ---
-TABLE_NAME = 'sorteios' # Tabela principal
+TABLE_NAME = 'sorteios'
 CYCLES_TABLE_NAME = 'ciclos'
-FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
+FREQ_SNAP_TABLE_NAME = 'freq_geral_snap' # <<< Nome da nova tabela
 
 # --- Configurações de Colunas (Data Loader) ---
 ORIGINAL_COLUMNS: List[str] = ['Concurso','Data Sorteio'] + [f'Bola{i}' for i in range(1, 16)]
@@ -30,14 +30,9 @@ INT_COLUMNS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 DATE_COLUMNS: List[str] = ['data_sorteio']
 
 # --- Configurações de Análise (Padrões) ---
-# Janelas calculadas pelo AGGREGATOR (usado no scorer/strategies)
-# <<< LISTA ATUALIZADA AQUI >>>
 AGGREGATOR_WINDOWS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
-# Janelas padrão para argumento --windows na linha de comando
 DEFAULT_CMD_WINDOWS: str = '10,25,50'
-# Intervalos para snapshots de frequência geral
 DEFAULT_SNAPSHOT_INTERVALS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
-# Janela curta/longa para cálculo de tendência
 TREND_SHORT_WINDOW = 10
 TREND_LONG_WINDOW = 50
 
