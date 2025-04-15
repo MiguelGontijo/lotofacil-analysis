@@ -3,10 +3,11 @@
 import argparse
 import logging
 import pandas as pd
+import sqlite3 # Importar para usar no _load_or_check_data
 from typing import Optional, Callable, Set, Dict
 
 # Importações de config e data handling
-from src.config import logger
+from src.config import logger, TABLE_NAME, DATABASE_PATH # Adicionado DATABASE_PATH
 from src.data_loader import load_and_clean_data
 from src.database_manager import save_to_db, read_data_from_db, get_draw_numbers
 
@@ -52,7 +53,6 @@ class AnalysisOrchestrator:
 
     def _setup_parser(self) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(description="Analisa/Backtest Lotofácil.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        # --- Grupos de Argumentos ---
         general_group = parser.add_argument_group('Opções Gerais e de Atualização')
         general_group.add_argument('--reload', action='store_true', help="Força recarga do Excel e reconstrói tabelas auxiliares.")
         general_group.add_argument('--update-cycles', action='store_true', help="Atualiza tabela 'ciclos'.")
@@ -66,7 +66,9 @@ class AnalysisOrchestrator:
         analysis_group.add_argument('--max-concurso', type=int, default=None, metavar='NUM', help="Concurso máximo para análise.")
         analysis_group.add_argument('--analysis', nargs='+', choices=['freq','pair','comb','cycle','cycle-stats','delay','max-delay','props','all'], default=None, metavar='TIPO', help="Análises a executar.")
         analysis_group.add_argument('--top-n', type=int, default=15, metavar='N', help="Top N combinações.")
-        analysis_group.add_argument('--windows', type=str, default='10,25,50', metavar='W1,W2,...', help="Janelas frequência.") # Mudar default aqui se AGGREGATOR_WINDOWS mudar
+        # Usa o default do config para help, mas o parser usa '10,25,50' default
+        from src.config import DEFAULT_CMD_WINDOWS # Importa para usar no help
+        analysis_group.add_argument('--windows', type=str, default=DEFAULT_CMD_WINDOWS, metavar='W1,W2,...', help=f"Janelas frequência. Padrão: {DEFAULT_CMD_WINDOWS}")
         analysis_group.add_argument('--plot', action='store_true', help="Gera gráficos.")
 
         backtest_group = parser.add_argument_group('Modo Backtest')
@@ -80,6 +82,7 @@ class AnalysisOrchestrator:
         parser.add_argument('--predict-last', action='store_true', help="Analisa N-1 e compara com N.")
         return parser
 
+
     def _ensure_data_loaded(self) -> bool:
         # (Código idêntico ao anterior)
         if self._last_contest_in_db is None:
@@ -87,21 +90,20 @@ class AnalysisOrchestrator:
         return True
 
     def _load_or_check_data(self) -> bool:
-        # (Código idêntico ao anterior, incluindo rebuild de ciclos no reload)
+        # (Código idêntico ao anterior, incluindo rebuild de ciclos/snaps no reload)
         if self.args.reload:
             cleaned_data = load_and_clean_data();
             if cleaned_data is None: return False
             if not save_to_db(df=cleaned_data, table_name=TABLE_NAME, if_exists='replace'): return False
-            try:
+            try: # Cria indice sorteios
                  with sqlite3.connect(DATABASE_PATH) as conn: conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_concurso ON {TABLE_NAME} (concurso);")
             except Exception as e: self.logger.error(f"Erro criar índice {TABLE_NAME}: {e}")
             self._last_contest_in_db = self._get_last_available_contest(force_read=True)
             if self._last_contest_in_db is None: return False
             self.logger.info("Forçando reconstrução da tabela de ciclos após reload...")
             update_cycles_table(force_rebuild=True)
-            # Força reconstrução dos snapshots de frequência também
             self.logger.info("Forçando reconstrução da tabela de snapshots de frequência após reload...")
-            update_freq_geral_snap_table(force_rebuild=True)
+            update_freq_geral_snap_table(force_rebuild=True) # <<< CHAMA REBUILD SNAPSHOTS
         else:
             if read_data_from_db(columns=['concurso'], concurso_maximo=1) is None: return False
             if self._last_contest_in_db is None: self._last_contest_in_db = self._get_last_available_contest()
@@ -155,18 +157,19 @@ class AnalysisOrchestrator:
                     except ImportError: self.logger.warning("Função plot_backtest_summary não encontrada.")
         else: self.logger.error("Backtest não retornou resultados.")
 
+
     def _run_predict_last_mode(self):
         # (Código idêntico ao anterior)
-        self.logger.info("Executando Predição Último Concurso (Scorer V4)...")
+        self.logger.info("Executando Predição Último Concurso (Scorer V5)...")
         n = self._last_contest_in_db;
         if n is None or n <= 1: self.logger.error("Concursos insuficientes."); return
         n_minus_1 = n - 1; self.logger.info(f"N={n}, N-1={n_minus_1}")
         analysis_results = get_consolidated_analysis(n_minus_1);
         if analysis_results is None: self.logger.error(f"Falha análises consolidadas."); return
-        scores = calculate_scores(analysis_results);
+        scores = calculate_scores(analysis_results); # Usará V5 por padrão
         if scores is None: self.logger.error(f"Falha calcular scores."); return
         selected_numbers: Optional[Set[int]] = None
-        if not scores.empty: print("\n--- Pontuação Calculada V4 (Top 5) ---"); print(scores.head(5).to_string()); print("\n--- Pontuação Calculada V4 (Bottom 5) ---"); print(scores.tail(5).to_string()); selected_numbers = set(scores.nlargest(15).index); print(f"\n--- Dezenas Selecionadas (Score V4 até {n_minus_1}) ---"); print(sorted(list(selected_numbers)))
+        if not scores.empty: print("\n--- Pontuação Calculada V5 (Top 5) ---"); print(scores.head(5).to_string()); print("\n--- Pontuação Calculada V5 (Bottom 5) ---"); print(scores.tail(5).to_string()); selected_numbers = set(scores.nlargest(15).index); print(f"\n--- Dezenas Selecionadas (Score V5 até {n_minus_1}) ---"); print(sorted(list(selected_numbers)))
         else: self.logger.error("Scores vazios.")
         actual_numbers = get_draw_numbers(n);
         if actual_numbers is None: self.logger.error(f"Falha resultado real {n}."); return
@@ -178,40 +181,40 @@ class AnalysisOrchestrator:
     # --- MÉTODO run() ATUALIZADO ---
     def run(self):
         """ Método principal: Atualiza tabelas OU executa modo principal """
-        self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v5 (Snapshots)")
+        self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v5")
 
-        # Ação 1: Atualizar Tabelas Auxiliares (Ciclos, Snapshots de Freq)
-        run_update = False
+        # Ação 1: Atualizar Tabelas Auxiliares (se pedido)
+        run_update_action = False # Flag para saber se fizemos uma ação de update
         if self.args.update_cycles or self.args.force_rebuild_cycles:
-            if not self._ensure_data_loaded(): self.logger.error("Dados base necessários p/ update ciclos."); return
             self.logger.info("Executando atualização da tabela de ciclos...")
+            # Garante que dados base existem ANTES de tentar atualizar
+            if not self._ensure_data_loaded(): self.logger.error("Dados base necessários p/ update ciclos."); return
             update_cycles_table(force_rebuild=self.args.force_rebuild_cycles)
-            run_update = True # Marcar que uma ação de update foi feita
+            run_update_action = True
 
         if self.args.update_freq_snaps or self.args.force_rebuild_freq_snaps:
              if not self._ensure_data_loaded(): self.logger.error("Dados base necessários p/ update freq snaps."); return
              self.logger.info("Executando atualização dos snapshots de frequência...")
-             update_freq_geral_snap_table(force_rebuild=self.args.force_rebuild_freq_snaps)
-             run_update = True
+             # Passa os intervalos definidos no config para o updater
+             from src.config import DEFAULT_SNAPSHOT_INTERVALS
+             update_freq_geral_snap_table(
+                 intervals=DEFAULT_SNAPSHOT_INTERVALS,
+                 force_rebuild=self.args.force_rebuild_freq_snaps
+             )
+             run_update_action = True
 
         # Se alguma ação de update foi executada, termina aqui.
-        if run_update:
+        if run_update_action:
              self.logger.info("Ação de atualização de tabela auxiliar concluída. Encerrando.")
              return
 
         # Ação 2: Executar Modos Principais (Análise, Backtest, Predict)
-        if not self._ensure_data_loaded(): self.logger.error("Pré-requisitos de dados não atendidos."); return
+        if not self._ensure_data_loaded(): # Garante dados para os modos principais
+            self.logger.error("Pré-requisitos de dados não atendidos."); return
 
-        if self.args.backtest:
-            self._run_backtest_mode()
-        elif self.args.predict_last:
-            self._run_predict_last_mode()
-        elif self.args.analysis is not None: # Roda análise se explicitamente pedido
-            self._run_analysis_mode()
-        else:
-            # Comportamento padrão se NENHUMA ação for especificada
-            self.logger.info("Nenhuma ação principal (--analysis, --backtest, --predict-last, --update-*) especificada. Executando análise padrão ('all').")
-            self.args.analysis = ['all'] # Define o padrão aqui se nada mais foi feito
-            self._run_analysis_mode()
+        if self.args.backtest: self._run_backtest_mode()
+        elif self.args.predict_last: self._run_predict_last_mode()
+        elif self.args.analysis is not None: self._run_analysis_mode()
+        else: self.logger.info("Nenhuma ação (--analysis, --backtest, --predict-last, --update-*). Use --help."); # Não roda 'all' por padrão se nada for passado
 
         self.logger.info("Aplicação Lotofacil Analysis finalizada.")
