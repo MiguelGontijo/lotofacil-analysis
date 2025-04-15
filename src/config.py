@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import logging
-from typing import List, Dict, Set # Add Set
+from typing import List, Dict, Set
 
 # --- Definições Globais ---
 ALL_NUMBERS: List[int] = list(range(1, 26))
@@ -18,7 +18,7 @@ DATABASE_PATH = PROJECT_ROOT / DATABASE_NAME
 PLOT_DIR = PROJECT_ROOT / 'plots'
 
 # --- Configurações de Tabelas BD ---
-TABLE_NAME = 'sorteios'
+TABLE_NAME = 'sorteios' # Tabela principal
 CYCLES_TABLE_NAME = 'ciclos'
 FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
 
@@ -31,6 +31,7 @@ DATE_COLUMNS: List[str] = ['data_sorteio']
 
 # --- Configurações de Análise (Padrões) ---
 # Janelas calculadas pelo AGGREGATOR (usado no scorer/strategies)
+# <<< LISTA ATUALIZADA AQUI >>>
 AGGREGATOR_WINDOWS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
 # Janelas padrão para argumento --windows na linha de comando
 DEFAULT_CMD_WINDOWS: str = '10,25,50'
