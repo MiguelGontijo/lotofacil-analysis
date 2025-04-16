@@ -3,11 +3,13 @@
 import pandas as pd
 import numpy as np
 import sqlite3
+import sys # Para ordem de bytes
 from typing import Optional, List
 
 # Importa do config e db_manager
 from src.config import logger, ALL_NUMBERS, DATABASE_PATH
-from src.database_manager import get_chunk_table_name, read_data_from_db # Usamos read_data_from_db por enquanto
+# get_chunk_table_name vem do db_manager (corrigido)
+from src.database_manager import get_chunk_table_name, read_data_from_db
 
 # Fallback
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
@@ -16,106 +18,74 @@ if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
     """
     Busca os dados de frequência do ÚLTIMO concurso de cada bloco completo
-    de tamanho 'interval_size' até 'concurso_maximo' e calcula o rank interno.
-
-    Args:
-        interval_size (int): Tamanho do bloco (ex: 10, 25).
-        concurso_maximo (Optional[int]): Último concurso a considerar. Se None, usa todos.
-
-    Returns:
-        Optional[pd.DataFrame]: DataFrame indexado por 'concurso_fim_chunk',
-                                com colunas d1_freq...d25_freq e d1_rank...d25_rank,
-                                ou None se a tabela não existir ou erro.
-                                Retorna DataFrame vazio se nenhum chunk completo for encontrado.
+    e calcula o rank interno, tratando corretamente os tipos de dados.
     """
     table_name = get_chunk_table_name(interval_size)
-    logger.info(f"Buscando estatísticas finais dos chunks de {interval_size} na tabela '{table_name}'...")
+    logger.info(f"Buscando stats finais chunks de {interval_size} em '{table_name}'...")
 
-    # 1. Determinar o limite superior real para buscar os chunks
-    # Poderíamos ler o MAX(concurso) da tabela de chunks, mas ler da tabela principal é mais seguro
-    # para garantir que não buscamos chunks além dos sorteios existentes.
-    df_max_c = read_data_from_db(columns=['concurso']) # Leitura rápida para pegar o último concurso
-    if df_max_c is None or df_max_c.empty:
-        logger.error("Não foi possível determinar o último concurso na tabela principal.")
-        return None
+    # 1. Determinar limite superior
+    df_max_c = read_data_from_db(columns=['concurso'])
+    if df_max_c is None or df_max_c.empty: return None
     effective_max_concurso = int(df_max_c['concurso'].max())
     limit_concurso = min(concurso_maximo, effective_max_concurso) if concurso_maximo else effective_max_concurso
 
-    # 2. Determinar os concursos que marcam o fim de cada chunk completo
-    if limit_concurso < interval_size:
-        logger.warning(f"Concurso máximo {limit_concurso} é menor que o intervalo {interval_size}. Nenhum chunk completo.")
-        return pd.DataFrame() # Retorna DF vazio
-    # O último concurso que finaliza um chunk é o maior múltiplo de interval_size <= limit_concurso
+    # 2. Determinar concursos finais dos chunks
+    if limit_concurso < interval_size: return pd.DataFrame()
     last_chunk_end = (limit_concurso // interval_size) * interval_size
     chunk_end_contests = list(range(interval_size, last_chunk_end + 1, interval_size))
+    if not chunk_end_contests: return pd.DataFrame()
 
-    if not chunk_end_contests:
-        logger.warning(f"Nenhum ponto final de chunk encontrado até {limit_concurso} para intervalo {interval_size}.")
-        return pd.DataFrame()
+    logger.info(f"Buscando dados para {len(chunk_end_contests)} chunks completos (finais: {chunk_end_contests[-1]})...")
 
-    logger.info(f"Buscando dados para {len(chunk_end_contests)} chunks completos (concursos finais: {chunk_end_contests[:3]}...{chunk_end_contests[-1]})...")
-
-    # 3. Buscar os dados SOMENTE para esses concursos finais na tabela de chunk
-    # Usar pd.read_sql_query para buscar múltiplos concursos de forma eficiente
+    # 3. Buscar dados SOMENTE dos concursos finais
     db_path = DATABASE_PATH
-    col_names = ['concurso'] + [f'd{i}' for i in ALL_NUMBERS]
-    col_names_str = ', '.join(f'"{col}"' for col in col_names)
+    col_names_d = [f'd{i}' for i in ALL_NUMBERS]
+    col_names_sql = ['concurso'] + col_names_d
+    col_names_str = ', '.join(f'"{col}"' for col in col_names_sql)
     placeholders = ', '.join(['?'] * len(chunk_end_contests))
     sql = f"SELECT {col_names_str} FROM {table_name} WHERE concurso IN ({placeholders}) ORDER BY concurso ASC"
 
+    df_chunk_ends = pd.DataFrame() # Inicializa vazio
     try:
         with sqlite3.connect(db_path) as conn:
-            # Verifica se a tabela existe antes de consultar
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
-            if cursor.fetchone() is None:
-                logger.error(f"Tabela de chunk '{table_name}' não encontrada no banco. Execute a reconstrução primeiro.")
-                return None
-
-            # Executa a consulta
+            if cursor.fetchone() is None: logger.error(f"Tabela '{table_name}' não encontrada."); return None
+            # Usar read_sql_query pode ser mais robusto com tipos que fetchall
             df_chunk_ends = pd.read_sql_query(sql, conn, params=chunk_end_contests)
 
-    except sqlite3.Error as e:
-        logger.error(f"Erro ao ler dados da tabela '{table_name}': {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Erro inesperado ao ler chunks: {e}")
-        return None
+    except Exception as e: logger.error(f"Erro ao ler chunks '{table_name}': {e}"); return None
 
-    if df_chunk_ends.empty:
-        logger.warning(f"Nenhum dado encontrado para os concursos finais dos chunks na tabela '{table_name}'.")
-        return pd.DataFrame()
+    if df_chunk_ends.empty: logger.warning(f"Nenhum dado encontrado para chunks finais em '{table_name}'."); return pd.DataFrame()
 
-    # Define o concurso final como índice
-    df_chunk_ends.set_index('concurso', inplace=True)
-    df_chunk_ends.index.name = 'concurso_fim_chunk'
+    # 4. *** CORREÇÃO DE TIPO EXPLÍCITA ***
+    logger.debug("Convertendo colunas de frequência para inteiro...")
+    freq_col_data = {}
+    for i in ALL_NUMBERS:
+        col_d = f'd{i}'
+        # Tenta converter para numérico, tratando erros e usando Int64 para NAs
+        numeric_col = pd.to_numeric(df_chunk_ends[col_d], errors='coerce').astype('Int64')
+        freq_col_data[f'{col_d}_freq'] = numeric_col # Renomeia para _freq
 
-    # Renomeia colunas de frequência para clareza
-    freq_cols = {f'd{i}': f'd{i}_freq' for i in ALL_NUMBERS}
-    df_chunk_ends.rename(columns=freq_cols, inplace=True)
+    # Cria DataFrame com colunas de frequência corrigidas
+    df_freq_corrected = pd.DataFrame(freq_col_data, index=df_chunk_ends['concurso'])
+    df_freq_corrected.fillna(0, inplace=True) # Preenche NAs com 0 (caso Int64 falhe)
+    df_freq_corrected = df_freq_corrected.astype(int) # Converte para int padrão após tratar NAs
 
-    # 4. Calcula os Ranks para cada linha (cada chunk final)
+    # Define o índice
+    df_freq_corrected.index.name = 'concurso_fim_chunk'
+
+    # 5. Calcula Ranks a partir das frequências corrigidas
     logger.info("Calculando ranks dentro de cada chunk...")
     rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
-    # axis=1 aplica o rank em cada linha (concurso)
-    # ascending=False faz com que a maior frequência receba rank 1
-    # pct=False retorna o rank numérico (1, 2, 3...)
-    # method='min' atribui o mesmo rank para empates (o menor rank do grupo)
-    df_ranks = df_chunk_ends[[f'd{i}_freq' for i in ALL_NUMBERS]].rank(axis=1, method='min', ascending=False, pct=False).astype(int)
-    df_ranks.columns = rank_cols # Renomeia colunas do DataFrame de ranks
+    df_ranks = df_freq_corrected[[f'd{i}_freq' for i in ALL_NUMBERS]].rank(axis=1, method='min', ascending=False, pct=False).astype(int)
+    df_ranks.columns = rank_cols
 
-    # 5. Junta os ranks ao DataFrame original
-    df_final_stats = pd.concat([df_chunk_ends, df_ranks], axis=1)
+    # 6. Junta frequências corrigidas e ranks
+    df_final_stats = pd.concat([df_freq_corrected, df_ranks], axis=1)
 
     logger.info(f"Estatísticas finais para {len(df_final_stats)} chunks de {interval_size} calculadas.")
     return df_final_stats
 
 # --- Funções futuras para calcular rank médio, std dev, etc. ---
-# def calculate_historical_rank_stats(interval_size: int, concurso_maximo: Optional[int] = None):
-#    df_stats = get_chunk_final_stats(interval_size, concurso_maximo)
-#    if df_stats is None: return None
-#    rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
-#    df_ranks_only = df_stats[rank_cols]
-#    # Calcular média, mediana, std dev para cada coluna dX_rank
-#    # ...
-#    pass
+# (Ainda não implementadas)
