@@ -3,54 +3,39 @@
 from typing import Optional, Set, Dict, Any
 import pandas as pd
 
-from src.config import logger
-# Importa o agregador e o scorer
-from src.analysis_aggregator import get_consolidated_analysis
+from src.config import logger, ALL_NUMBERS
+# Importa APENAS o scorer para calcular o score a partir dos dados recebidos
 from src.scorer import calculate_scores
+# NÃO importa mais o agregador
 
 NUM_DEZENAS_LOTOFACIL = 15
+if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 
-def select_top_scored(concurso_maximo: int,
+# --- Assinatura da função alterada ---
+def select_top_scored(current_analysis: Dict[str, Any],
                       num_to_select: int = NUM_DEZENAS_LOTOFACIL,
-                      scoring_config: Optional[Dict[str, Dict]] = None # Permite passar config customizada no futuro
+                      scoring_config: Optional[Dict[str, Dict]] = None
                       ) -> Optional[Set[int]]:
     """
-    Seleciona as N dezenas com maior pontuação calculada pelo scorer,
-    baseado nas análises consolidadas até concurso_maximo.
-
-    Args:
-        concurso_maximo (int): O último concurso a considerar para as análises.
-        num_to_select (int): Quantas dezenas selecionar.
-        scoring_config (Optional[Dict[str, Dict]]): Configuração para o scorer (usa default se None).
-
-    Returns:
-        Optional[Set[int]]: Conjunto com as N dezenas selecionadas, ou None se falhar.
+    Seleciona N dezenas com maior pontuação, usando dados JÁ CALCULADOS.
     """
-    logger.debug(f"Estratégia 'Top Score': Agregando análises até {concurso_maximo}...")
+    logger.debug(f"Estratégia 'Top Score': Usando dados pré-calculados...")
 
-    # 1. Obter resultados consolidados das análises
-    analysis_results = get_consolidated_analysis(concurso_maximo)
-    if analysis_results is None:
-        logger.error("Falha ao obter análises consolidadas para estratégia de score.")
-        return None
+    # *** NÃO CHAMA MAIS o agregador get_consolidated_analysis ***
+    # Os dados necessários já devem estar em current_analysis
 
-    # 2. Calcular os scores
-    scores = calculate_scores(analysis_results, config=scoring_config)
+    # 1. Calcula os scores a partir dos dados recebidos
+    scores = calculate_scores(current_analysis, config=scoring_config) # Passa o dict recebido
     if scores is None:
-        logger.error("Falha ao calcular scores para estratégia.")
+        logger.error("Falha ao calcular scores para estratégia 'Top Score'.")
         return None
     if scores.empty:
          logger.warning("Scores calculados resultaram em Series vazia.")
          return None
 
-    # 3. Selecionar os top N scores
+    # 2. Seleciona os top N scores
     top_scored = scores.nlargest(num_to_select)
-
-    if len(top_scored) < num_to_select:
-        logger.warning(f"Menos de {num_to_select} dezenas com score válido. Selecionando as disponíveis.")
-
     selected_numbers = set(top_scored.index)
-    logger.debug(f"Estratégia 'Top Score': Selecionadas {len(selected_numbers)} dezenas: {sorted(list(selected_numbers))}")
-    # logger.debug(f"Top scores:\n{top_scored.to_string()}") # Log opcional dos scores
 
+    logger.debug(f"Estratégia 'Top Score': Selecionadas {len(selected_numbers)}")
     return selected_numbers

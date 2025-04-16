@@ -3,25 +3,27 @@
 import pandas as pd
 import numpy as np
 import sqlite3
+import sys
 from typing import List, Dict, Optional, Tuple, Set
+from collections import Counter
+from pathlib import Path # <<< IMPORT CORRETO ADICIONADO AQUI >>>
 
-# Importa funções do DB Manager (SEM get_cycles_df)
-from src.database_manager import read_data_from_db, create_cycles_table, get_last_cycle_end, save_to_db
 # Importa do config
 from src.config import (
     logger, NEW_BALL_COLUMNS, ALL_NUMBERS, ALL_NUMBERS_SET,
-    DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME
+    DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME, BASE_COLS
 )
-# Importa a função de cálculo de frequência
+# Importa do database_manager (APENAS funções de BD)
+from src.database_manager import (
+    read_data_from_db, create_cycles_table, get_last_cycle_end,
+    save_to_db, get_draw_numbers
+)
+# Importa de frequency_analysis
 from src.analysis.frequency_analysis import calculate_frequency
-
-# Usa constantes do config
-BASE_COLS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
-
 
 # --- FUNÇÃO INTERNA PARA ENCONTRAR CICLOS EM UM DF ---
 def _find_new_cycles_in_data(df_new_data: pd.DataFrame, start_contest_for_search: int, initial_seen_numbers: Set[int], last_cycle_number: int) -> List[Dict]:
-    # (Código idêntico ao da última versão correta)
+    # (Código completo e correto)
     new_cycles_found: List[Dict] = []; current_cycle_numbers = initial_seen_numbers.copy(); cycle_start_concurso = start_contest_for_search; cycle_count = last_cycle_number
     logger.info(f"Buscando novos ciclos a partir do concurso {cycle_start_concurso}...")
     for index, row in df_new_data.iterrows():
@@ -39,20 +41,19 @@ def _find_new_cycles_in_data(df_new_data: pd.DataFrame, start_contest_for_search
     logger.info(f"{len(new_cycles_found)} novos ciclos completos encontrados.")
     return new_cycles_found
 
-
 # --- FUNÇÃO PARA ATUALIZAR TABELA PERSISTENTE ---
 def update_cycles_table(force_rebuild: bool = False):
-    # (Código idêntico ao da última versão correta)
+    # (Código completo e correto)
     logger.info(f"Atualizando tabela 'ciclos'... {'(Rebuild)' if force_rebuild else ''}")
-    create_cycles_table(); last_recorded_end = -1; last_cycle_num = 0; start_search_from = 1
     db_path = DATABASE_PATH; cycles_table_name = CYCLES_TABLE_NAME
+    create_cycles_table(db_path); last_recorded_end = -1; last_cycle_num = 0; start_search_from = 1
     if force_rebuild:
         logger.warning("REBUILD: Apagando dados de 'ciclos'.");
         try:
             with sqlite3.connect(db_path) as conn: conn.execute(f"DELETE FROM {cycles_table_name};")
         except sqlite3.Error as e: logger.error(f"Erro ao limpar 'ciclos': {e}"); return
     else:
-        last_recorded_end_val = get_last_cycle_end()
+        last_recorded_end_val = get_last_cycle_end(db_path)
         if last_recorded_end_val is not None:
              last_recorded_end = last_recorded_end_val; start_search_from = last_recorded_end + 1
              try:
@@ -69,7 +70,7 @@ def update_cycles_table(force_rebuild: bool = False):
                   with sqlite3.connect(db_path) as conn: res = conn.execute(f"SELECT MAX(numero_ciclo) FROM {cycles_table_name} WHERE concurso_fim < ?", (read_from,)).fetchone(); effective_last_cycle_num = int(res[0]) if res and res[0] is not None else 0
              else: logger.warning(f"Info do último ciclo {last_recorded_end} não encontrada."); read_from = start_search_from
          except Exception as e: logger.error(f"Erro ao ler último ciclo: {e}."); read_from = start_search_from
-    df_data_to_scan = read_data_from_db(table_name=TABLE_NAME, columns=BASE_COLS, concurso_minimo=read_from)
+    df_data_to_scan = read_data_from_db(db_path=db_path, table_name=TABLE_NAME, columns=BASE_COLS, concurso_minimo=read_from)
     if df_data_to_scan is None or df_data_to_scan.empty: logger.info(f"Nenhum dado novo em '{TABLE_NAME}' a partir de {read_from}."); return
     all_found_cycles = _find_new_cycles_in_data(df_data_to_scan, read_from, initial_numbers, effective_last_cycle_num)
     new_cycles = [c for c in all_found_cycles if c['concurso_fim'] > last_recorded_end]
@@ -80,42 +81,51 @@ def update_cycles_table(force_rebuild: bool = False):
              try:
                   with sqlite3.connect(db_path) as conn: conn.execute(f"DELETE FROM {cycles_table_name} WHERE concurso_inicio >= ?", (min_recalculated_start,)); logger.info(f"Ciclos antigos a partir de {min_recalculated_start} removidos.")
              except sqlite3.Error as e: logger.error(f"Erro ao deletar ciclos antigos p/ append: {e}")
-        success = save_to_db(new_cycles_df, table_name=cycles_table_name, if_exists=write_mode)
+        success = save_to_db(new_cycles_df, table_name=cycles_table_name, db_path=db_path, if_exists=write_mode)
         if success:
             logger.info(f"{len(new_cycles)} ciclos {'add/atualizados' if write_mode=='append' else 'reconstruídos'}.")
-            try:
-                with sqlite3.connect(db_path) as conn: conn.execute(f"CREATE INDEX IF NOT EXISTS idx_ciclos_numero ON {cycles_table_name} (numero_ciclo);"); conn.execute(f"CREATE INDEX IF NOT EXISTS idx_ciclos_concurso_fim ON {cycles_table_name} (concurso_fim);"); logger.info(f"Índices para '{cycles_table_name}' ok.")
+            try: # Cria índices após salvar
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_ciclos_numero ON {cycles_table_name} (numero_ciclo);")
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_ciclos_concurso_fim ON {cycles_table_name} (concurso_fim);")
+                    logger.info(f"Índices para '{cycles_table_name}' ok.")
             except sqlite3.Error as e: logger.error(f"Erro criar índices para '{cycles_table_name}': {e}")
         else: logger.error("Falha ao salvar novos ciclos no BD.")
     else: logger.info("Nenhum NOVO ciclo completo encontrado.")
 
 
 # --- FUNÇÃO PARA LER CICLOS DA TABELA ---
-# (Esta função está definida aqui e não precisa ser importada do db_manager)
-def get_cycles_df(concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
-    """ Lê os dados da tabela 'ciclos' do banco de dados. """
-    cycles_table_name = CYCLES_TABLE_NAME # Usa constante do config
+def get_cycles_df(concurso_maximo: Optional[int] = None, db_path: Path = DATABASE_PATH) -> Optional[pd.DataFrame]:
+    """ Lê os dados da tabela 'ciclos' e garante tipos INT padrão. """
+    cycles_table_name = CYCLES_TABLE_NAME
     logger.info(f"Buscando dados da tabela '{cycles_table_name}' {('ate ' + str(concurso_maximo)) if concurso_maximo else ''}...")
-    create_cycles_table(); db_path = DATABASE_PATH;
+    create_cycles_table(db_path);
     try:
         with sqlite3.connect(db_path) as conn:
             sql_query = f"SELECT numero_ciclo, concurso_inicio, concurso_fim, duracao FROM {cycles_table_name}"; params = []
             if concurso_maximo is not None: sql_query += " WHERE concurso_fim <= ?"; params.append(concurso_maximo)
             sql_query += " ORDER BY numero_ciclo ASC;"
-            df = pd.read_sql_query(sql_query, conn, params=params); logger.info(f"{len(df)} ciclos lidos.");
+            df = pd.read_sql_query(sql_query, conn, params=params);
+            log_msg = f"{len(df)} ciclos lidos da tabela '{cycles_table_name}'."
+            if df is None: logger.error(f"Leitura de '{cycles_table_name}' retornou None."); return None
             if not df.empty:
-                 for col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+                 logger.debug(f"Tipos ANTES conversão get_cycles_df:\n{df.dtypes}")
+                 for col in ['numero_ciclo', 'concurso_inicio', 'concurso_fim', 'duracao']:
+                     if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                 logger.debug(f"Tipos DEPOIS conversão get_cycles_df:\n{df.dtypes}")
+            else: logger.info("Nenhum ciclo encontrado na tabela para o período.")
+            logger.info(log_msg)
             return df
-    except sqlite3.Error as e: logger.error(f"Erro ao ler '{cycles_table_name}': {e}"); return None
+    except Exception as e: logger.error(f"Erro ao ler '{cycles_table_name}': {e}"); return None
 
 
 # --- FUNÇÃO PARA CALCULAR FREQUÊNCIA POR CICLO ---
 def calculate_frequency_per_cycle(cycles_df: pd.DataFrame) -> Dict[int, Optional[pd.Series]]:
-    # (Código idêntico ao da última versão correta)
+    # (Código completo como antes)
     cycle_frequencies: Dict[int, Optional[pd.Series]] = {};
     if cycles_df is None or cycles_df.empty: return cycle_frequencies
     logger.info(f"Calculando frequência para {len(cycles_df)} ciclos...");
-    from src.analysis.frequency_analysis import calculate_frequency # Import local ok
+    # from src.analysis.frequency_analysis import calculate_frequency # Import local é ok
     for index, row in cycles_df.iterrows():
         try: cycle_num = int(row['numero_ciclo']); start_c = int(row['concurso_inicio']); end_c = int(row['concurso_fim']); cycle_frequencies[cycle_num] = calculate_frequency(concurso_minimo=start_c, concurso_maximo=end_c)
         except Exception as e: logger.error(f"Erro processar linha ciclo {index}: {row}. E: {e}"); cycle_frequencies[int(row.get('numero_ciclo',-1))] = None
@@ -124,12 +134,12 @@ def calculate_frequency_per_cycle(cycles_df: pd.DataFrame) -> Dict[int, Optional
 
 # --- FUNÇÃO PARA CALCULAR STATS DO CICLO ATUAL INCOMPLETO ---
 def calculate_current_incomplete_cycle_stats(concurso_maximo: int) -> Tuple[Optional[int], Optional[Set[int]], Optional[pd.Series]]:
-    # (Código idêntico ao da última versão correta - já usa get_cycles_df local)
+    # (Código completo como antes)
     logger.info(f"Identificando ciclo incompleto até {concurso_maximo}...")
-    relevant_cycles = get_cycles_df(concurso_maximo=concurso_maximo) # Chama a função local
+    relevant_cycles = get_cycles_df(concurso_maximo=concurso_maximo)
     start_of_current_cycle: Optional[int] = None
     if relevant_cycles is None : logger.error("Falha ler ciclos."); start_of_current_cycle = None
-    elif relevant_cycles.empty: df_min = read_data_from_db(columns=['concurso'], concurso_maximo=concurso_maximo); min_c = df_min['concurso'].min() if df_min is not None else None; start_of_current_cycle = int(min_c) if not pd.isna(min_c) else None; logger.info(f"Nenhum ciclo completo na tabela até {concurso_maximo}.")
+    elif relevant_cycles.empty: df_min = read_data_from_db(columns=['concurso'], concurso_maximo=concurso_maximo); min_c = df_min['concurso'].min() if df_min is not None and not df_min.empty else None; start_of_current_cycle = int(min_c) if pd.notna(min_c) else None; logger.info(f"Nenhum ciclo completo na tabela até {concurso_maximo}.")
     else: last_complete_cycle_end_val = relevant_cycles['concurso_fim'].max(); start_of_current_cycle = int(last_complete_cycle_end_val + 1) if pd.notna(last_complete_cycle_end_val) else None
     if start_of_current_cycle is None or start_of_current_cycle > concurso_maximo : logger.warning(f"Não há ciclo incompleto válido até {concurso_maximo}."); return None, None, None
     logger.info(f"Ciclo incompleto atual: {start_of_current_cycle} - {concurso_maximo}.")
@@ -141,7 +151,7 @@ def calculate_current_incomplete_cycle_stats(concurso_maximo: int) -> Tuple[Opti
 
 # --- FUNÇÃO PARA CALCULAR ATRASO DENTRO DO CICLO ATUAL ---
 def calculate_current_intra_cycle_delay(current_cycle_start: Optional[int], concurso_maximo: int) -> Optional[pd.Series]:
-    # (Código idêntico ao da última versão correta)
+    # (Código completo como antes)
     if current_cycle_start is None or current_cycle_start > concurso_maximo: return None
     logger.info(f"Calculando atraso intra-ciclo atual ({current_cycle_start} - {concurso_maximo})...")
     df_cycle = read_data_from_db(columns=BASE_COLS, concurso_minimo=current_cycle_start, concurso_maximo=concurso_maximo)
@@ -163,9 +173,9 @@ def calculate_current_intra_cycle_delay(current_cycle_start: Optional[int], conc
 
 # --- FUNÇÃO PARA CALCULAR STATS HISTÓRICOS DE ATRASO INTRA-CICLO ---
 def calculate_historical_intra_cycle_delay_stats(cycles_df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    # (Código idêntico ao da última versão correta)
+    # (Código completo como antes)
     if cycles_df is None or cycles_df.empty: return None
-    logger.info(f"Calculando stats históricos de atraso intra-ciclo para {len(cycles_df)} ciclos...")
+    logger.info(f"Calculando stats históricos de atraso intra-ciclo...")
     all_intra_delays: Dict[int, List[int]] = {n: [] for n in ALL_NUMBERS}; processed_cycles = 0
     for index, cycle_row in cycles_df.iterrows():
         start_c, end_c, cycle_num = int(cycle_row['concurso_inicio']), int(cycle_row['concurso_fim']), int(cycle_row['numero_ciclo'])
@@ -178,7 +188,7 @@ def calculate_historical_intra_cycle_delay_stats(cycles_df: pd.DataFrame) -> Opt
             for n in drawn_numbers:
                 if n in last_seen_in_this_cycle: delay = current_concurso - last_seen_in_this_cycle[n] - 1; all_intra_delays[n].append(delay)
                 last_seen_in_this_cycle[n] = current_concurso
-        processed_cycles += 1; #if processed_cycles % 100 == 0: logger.info(f"{processed_cycles}/{len(cycles_df)} ciclos processados...") # Log opcional
+        processed_cycles += 1;
     stats_data = []
     for n in ALL_NUMBERS:
         delays = all_intra_delays[n]; mean_delay, max_delay_calc, std_dev_delay = np.nan, 0, np.nan
@@ -187,16 +197,59 @@ def calculate_historical_intra_cycle_delay_stats(cycles_df: pd.DataFrame) -> Opt
         elif len(delays) == 1: std_dev_delay = 0
         stats_data.append({'dezena': n, 'avg_hist_intra_delay': mean_delay, 'max_hist_intra_delay': max_delay_calc, 'std_hist_intra_delay': std_dev_delay})
     results_df = pd.DataFrame(stats_data).set_index('dezena')
-    logger.info("Cálculo de stats históricos de atraso intra-ciclo concluído."); return results_df
+    logger.info("Stats históricos de atraso intra-ciclo concluídos."); return results_df
+
+
+# --- FUNÇÃO PARA CALCULAR STATS DE FECHAMENTO ---
+# (Código completo como antes, com verificação .empty)
+def calculate_closing_number_stats(concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
+    """ Analisa quais dezenas foram responsáveis por fechar cada ciclo completo. """
+    logger.info(f"Calculando estatísticas de fechamento de ciclo...")
+    # Chama get_cycles_df LOCAL (corrigido)
+    cycles_df = get_cycles_df(concurso_maximo=concurso_maximo)
+
+    # Verificação padrão
+    if cycles_df is None or cycles_df.empty:
+        logger.warning(f"Nenhum ciclo completo encontrado/erro.")
+        return pd.DataFrame({'closing_freq': 0,'sole_closing_freq': 0}, index=pd.Index(ALL_NUMBERS, name='dezena'))
+
+    df_len = len(cycles_df)
+    logger.info(f"Analisando {df_len} ciclos completos para fechamento...")
+    closing_counter = Counter(); sole_closing_counter = Counter(); processed_cycles = 0
+
+    # Loop principal (Restaurado)
+    for index, cycle_row in cycles_df.iterrows():
+        try: cycle_num, start_c, end_c = int(cycle_row['numero_ciclo']), int(cycle_row['concurso_inicio']), int(cycle_row['concurso_fim'])
+        except Exception as e: logger.error(f"Erro linha ciclo {index}: {e}"); continue
+        concurso_fim_menos_1 = end_c - 1; seen_before_end: Set[int] = set()
+        if start_c <= concurso_fim_menos_1:
+            df_before_end = read_data_from_db(columns=BASE_COLS, concurso_minimo=start_c, concurso_maximo=concurso_fim_menos_1)
+            if df_before_end is None: continue
+            if not df_before_end.empty:
+                 for _, draw_row in df_before_end.iterrows(): seen_before_end.update({int(n) for n in draw_row[NEW_BALL_COLUMNS].dropna().values})
+        drawn_at_end = get_draw_numbers(end_c)
+        if drawn_at_end is None: continue
+        union_set = seen_before_end.union(drawn_at_end)
+        if union_set != ALL_NUMBERS_SET: logger.warning(f"Inconsistência ciclo {cycle_num}."); continue
+        missing_before_end = ALL_NUMBERS_SET - seen_before_end; closing_numbers = drawn_at_end.intersection(missing_before_end)
+        if not closing_numbers: logger.warning(f"Ciclo {cycle_num} sem fechadoras?"); continue
+        closing_counter.update(closing_numbers)
+        if len(closing_numbers) == 1: sole_closing_counter.update(closing_numbers)
+        processed_cycles += 1
+        if processed_cycles % 100 == 0: logger.info(f"{processed_cycles}/{df_len} ciclos proc. p/ fechamento...")
+
+    stats_df = pd.DataFrame(index=pd.Index(ALL_NUMBERS, name='dezena')); stats_df['closing_freq'] = stats_df.index.map(closing_counter).fillna(0).astype(int); stats_df['sole_closing_freq'] = stats_df.index.map(sole_closing_counter).fillna(0).astype(int)
+    logger.info("Cálculo de stats de fechamento concluído."); return stats_df
 
 
 # --- FUNÇÃO PARA EXIBIR STATS DE CICLOS SELECIONADOS ---
+# (Com indentação correta)
 def run_cycle_frequency_analysis(cycles_df: pd.DataFrame, num_cycles_each_end: int = 3):
-    # (Código idêntico ao da última versão correta, com indentação já corrigida)
-    if cycles_df is None or cycles_df.empty: logger.warning("DataFrame de ciclos vazio."); return
+    """ Calcula e EXIBE a frequência das dezenas para ciclos selecionados. """
+    if cycles_df is None or cycles_df.empty: logger.warning("DF ciclos vazio."); return
     logger.info(f"Calculando/Exibindo frequência para ciclos selecionados...")
     cycle_freq_dict = calculate_frequency_per_cycle(cycles_df);
-    if not cycle_freq_dict: logger.warning("Dicionário de frequência por ciclo vazio."); return
+    if not cycle_freq_dict: logger.warning("Dict freq por ciclo vazio."); return
     cycles_to_display_map: Dict[str, int] = {}; total_cycles = len(cycles_df); n = num_cycles_each_end
     if total_cycles > 0: # Primeiros N
         for i in range(min(n, total_cycles)): row = cycles_df.iloc[i]; cn=int(row['numero_ciclo']); cycles_to_display_map[f"Ciclo {cn} ({int(row['duracao'])}c) [{int(row['concurso_inicio'])}-{int(row['concurso_fim'])}]"] = cn
@@ -215,13 +268,13 @@ def run_cycle_frequency_analysis(cycles_df: pd.DataFrame, num_cycles_each_end: i
         if freq_series is not None and not freq_series.empty:
             print(f"\n>> Frequência no {cycle_name} <<")
             try:
-                print("Top 5 +:")
-                print(freq_series.nlargest(min(5, len(freq_series))).to_string())
-                print("\nTop 5 -:")
-                print(freq_series.nsmallest(min(5, len(freq_series))).to_string())
-                print("-" * 30)
+                print("Top 5 +:") # Indentado
+                print(freq_series.nlargest(min(5, len(freq_series))).to_string()) # Indentado
+                print("\nTop 5 -:") # Indentado
+                print(freq_series.nsmallest(min(5, len(freq_series))).to_string()) # Indentado
+                print("-" * 30) # Indentado
             except Exception as e:
-                 logger.error(f"Erro ao obter top/bottom 5 para ciclo {cycle_num}: {e}")
+                 logger.error(f"Erro ao obter top/bottom 5 para ciclo {cycle_num}: {e}") # Indentado
         else:
-            logger.warning(f"Frequência não encontrada ou vazia para ciclo {cycle_num} ({cycle_name})")
+            logger.warning(f"Frequência não encontrada ou vazia para ciclo {cycle_num}") # Indentado
     logger.info("Análise de frequência por ciclo concluída (resumo impresso).")
