@@ -4,15 +4,14 @@ import argparse
 import logging
 import pandas as pd
 import sqlite3
-from typing import Optional, Callable, Set, Dict
+from typing import Optional, Callable, Set, Dict, List # Adicionado List
 
-# Importações de config (INCLUINDO DEFAULT_SNAPSHOT_INTERVALS)
-from src.config import logger, TABLE_NAME, DATABASE_PATH, DEFAULT_SNAPSHOT_INTERVALS
-
+# Importações config e data handling
+from src.config import logger, TABLE_NAME, DATABASE_PATH, DEFAULT_SNAPSHOT_INTERVALS, DEFAULT_CMD_WINDOWS, ALL_CHUNK_INTERVALS # Usa ALL_CHUNK_INTERVALS
 from src.data_loader import load_and_clean_data
 from src.database_manager import save_to_db, read_data_from_db, get_draw_numbers
 
-# Importa as FUNÇÕES DE EXECUÇÃO dos pipeline steps
+# Importa pipeline steps
 from src.pipeline_steps.execute_frequency import execute_frequency_analysis
 from src.pipeline_steps.execute_pairs import execute_pair_analysis
 from src.pipeline_steps.execute_combinations import execute_combination_analysis
@@ -22,17 +21,18 @@ from src.pipeline_steps.execute_delay import execute_delay_analysis
 from src.pipeline_steps.execute_max_delay import execute_max_delay_analysis
 from src.pipeline_steps.execute_properties import execute_properties_analysis
 
-# Importa o runner do backtester e ESTRATÉGIAS
+# Importa backtester e strategies
 from src.backtester.runner import run_backtest
 from src.strategies.frequency_strategies import *
 from src.strategies.delay_strategies import *
 from src.strategies.scoring_strategies import *
 
-# Importa o agregador, scorer e ATUALIZADORES DE TABELA
+# Importa agregador, scorer e updaters
 from src.analysis_aggregator import get_consolidated_analysis
 from src.scorer import calculate_scores
 from src.analysis.cycle_analysis import update_cycles_table
-from src.table_updater import update_freq_geral_snap_table
+# Importa os updaters de tabela
+from src.table_updater import update_freq_geral_snap_table, rebuild_chunk_freq_detail_table # Importa o updater de chunk
 
 # Verifica plotagem
 try:
@@ -51,21 +51,51 @@ class AnalysisOrchestrator:
         if self.args.plot and not self.plotting_available: self.logger.warning("Plot solicitado, mas libs não encontradas.")
         self._last_contest_in_db = None
 
+    # --- MÉTODO _setup_parser ATUALIZADO ---
     def _setup_parser(self) -> argparse.ArgumentParser:
-        # (Definição dos argumentos idêntica à anterior)
         parser = argparse.ArgumentParser(description="Analisa/Backtest Lotofácil.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        general_group = parser.add_argument_group('Opções Gerais e de Atualização'); general_group.add_argument('--reload', action='store_true', help="Força recarga do Excel e reconstrói tabelas."); general_group.add_argument('--update-cycles', action='store_true', help="Atualiza tabela 'ciclos'."); general_group.add_argument('--force-rebuild-cycles', action='store_true', help="Reconstrói tabela 'ciclos'."); general_group.add_argument('--update-freq-snaps', action='store_true', help="Atualiza tabela 'freq_geral_snap'."); general_group.add_argument('--force-rebuild-freq-snaps', action='store_true', help="Reconstrói tabela 'freq_geral_snap'.")
-        analysis_group = parser.add_argument_group('Modo Análise'); analysis_group.add_argument('--max-concurso', type=int, default=None, metavar='NUM', help="Concurso máximo."); analysis_group.add_argument('--analysis', nargs='+', choices=['freq','pair','comb','cycle','cycle-stats','delay','max-delay','props','all'], default=None, metavar='TIPO', help="Análises a executar."); analysis_group.add_argument('--top-n', type=int, default=15, metavar='N', help="Top N combinações."); from src.config import DEFAULT_CMD_WINDOWS; analysis_group.add_argument('--windows', type=str, default=DEFAULT_CMD_WINDOWS, metavar='W1,...', help=f"Janelas freq. Padrão: {DEFAULT_CMD_WINDOWS}"); analysis_group.add_argument('--plot', action='store_true', help="Gera gráficos.")
-        backtest_group = parser.add_argument_group('Modo Backtest'); backtest_group.add_argument('--backtest', action='store_true', help="Ativa backtesting."); backtest_group.add_argument('--strategy', type=str, choices=['most_freq', 'least_freq', 'most_freq_recent', 'most_delayed', 'top_score'], default='most_freq', help="Estratégia."); backtest_group.add_argument('--strategy-window', type=int, default=25, metavar='W', help="Janela p/ est. recente."); backtest_group.add_argument('--start', type=int, default=None, metavar='CONC_INICIO', help="Início backtest."); backtest_group.add_argument('--end', type=int, default=None, metavar='CONC_FIM', help="Fim backtest.")
-        parser.add_argument('--predict-last', action='store_true', help="Analisa N-1 e compara com N.")
+
+        # Grupo Geral e Updates
+        update_group = parser.add_argument_group('Opções Gerais e de Atualização de Tabelas Auxiliares')
+        update_group.add_argument('--reload', action='store_true', help="Força recarga do Excel e reconstrói TODAS as tabelas auxiliares (ciclos, freq snaps, chunks).")
+        update_group.add_argument('--update-cycles', action='store_true', help="Atualiza incrementalmente tabela 'ciclos'.")
+        update_group.add_argument('--force-rebuild-cycles', action='store_true', help="Reconstrói completamente tabela 'ciclos'.")
+        update_group.add_argument('--update-freq-snaps', action='store_true', help="Atualiza incrementalmente tabela 'freq_geral_snap'.")
+        update_group.add_argument('--force-rebuild-freq-snaps', action='store_true', help="Reconstrói completamente tabela 'freq_geral_snap'.")
+        # Argumentos para CHUNK FREQ DETAIL (aceita um ou mais inteiros ou 'all')
+        update_group.add_argument('--rebuild-chunk-freq', nargs='+', metavar='INTERVAL_OR_ALL', help="Reconstrói tabela(s) de freq detalhada por chunk (ex: 10 25, ou 'all'). LENTO!")
+        # update_group.add_argument('--update-chunk-freq', nargs='+', metavar='INTERVAL_OR_ALL', help="Atualiza tabela(s) de freq detalhada por chunk (NÃO IMPLEMENTADO).")
+
+        # Grupo Análise
+        analysis_group = parser.add_argument_group('Modo Análise')
+        analysis_group.add_argument('--max-concurso', type=int, default=None, metavar='NUM', help="Concurso máximo para análise.")
+        analysis_group.add_argument('--analysis', nargs='+', choices=['freq','pair','comb','cycle','cycle-stats','delay','max-delay','props','all'], default=None, metavar='TIPO', help="Análises a executar.")
+        analysis_group.add_argument('--top-n', type=int, default=15, metavar='N', help="Top N combinações.")
+        analysis_group.add_argument('--windows', type=str, default=DEFAULT_CMD_WINDOWS, metavar='W1,...', help=f"Janelas freq. Padrão: {DEFAULT_CMD_WINDOWS}")
+        analysis_group.add_argument('--plot', action='store_true', help="Gera gráficos.")
+
+        # Grupo Backtest
+        backtest_group = parser.add_argument_group('Modo Backtest')
+        backtest_group.add_argument('--backtest', action='store_true', help="Ativa backtesting.")
+        backtest_group.add_argument('--strategy', type=str, choices=['most_freq', 'least_freq', 'most_freq_recent', 'most_delayed', 'top_score'], default='most_freq', help="Estratégia.")
+        backtest_group.add_argument('--strategy-window', type=int, default=25, metavar='W', help="Janela p/ est. recente.")
+        backtest_group.add_argument('--start', type=int, default=None, metavar='CONC_INICIO', help="Início backtest.")
+        backtest_group.add_argument('--end', type=int, default=None, metavar='CONC_FIM', help="Fim backtest.")
+
+        # Grupo Predição
+        predict_group = parser.add_argument_group('Modo Predição')
+        predict_group.add_argument('--predict-last', action='store_true', help="Analisa N-1, pontua com Scorer V6 e compara com N.")
+
         return parser
 
     def _ensure_data_loaded(self) -> bool:
+        # (Código idêntico ao anterior)
         if self._last_contest_in_db is None:
              if not self._load_or_check_data(): self.logger.error("Falha carregar/verificar dados."); return False
         return True
 
     def _load_or_check_data(self) -> bool:
+        # (Código idêntico ao anterior, incluindo rebuilds no reload)
         if self.args.reload:
             cleaned_data = load_and_clean_data();
             if cleaned_data is None: return False
@@ -78,6 +108,12 @@ class AnalysisOrchestrator:
             self.logger.info("Forçando reconstrução tabelas auxiliares após reload...")
             update_cycles_table(force_rebuild=True)
             update_freq_geral_snap_table(force_rebuild=True)
+            # Reconstrói TODOS os chunks definidos no config após reload
+            from src.config import ALL_CHUNK_INTERVALS
+            self.logger.info(f"Reconstruindo tabelas de chunk para intervalos: {ALL_CHUNK_INTERVALS}")
+            for interval in ALL_CHUNK_INTERVALS:
+                 rebuild_chunk_freq_detail_table(interval_size=interval)
+
         else:
             if read_data_from_db(columns=['concurso'], concurso_maximo=1) is None: return False
             if self._last_contest_in_db is None: self._last_contest_in_db = self._get_last_available_contest()
@@ -85,6 +121,7 @@ class AnalysisOrchestrator:
         self.logger.info("Dados do BD acessíveis."); return True
 
     def _get_last_available_contest(self, force_read: bool = False) -> Optional[int]:
+        # (Código idêntico ao anterior)
         if not force_read and hasattr(self, '_last_contest_in_db') and self._last_contest_in_db is not None: return self._last_contest_in_db
         df = read_data_from_db(columns=['concurso']);
         if df is not None and not df.empty: max_c = df['concurso'].max(); self._last_contest_in_db = int(max_c) if not pd.isna(max_c) else None; return self._last_contest_in_db
@@ -132,7 +169,7 @@ class AnalysisOrchestrator:
 
     def _run_predict_last_mode(self):
         # (Código idêntico ao anterior)
-        self.logger.info("Executando Predição Último Concurso (Scorer V5)...")
+        self.logger.info("Executando Predição Último Concurso (Scorer V6)...")
         n = self._last_contest_in_db;
         if n is None or n <= 1: self.logger.error("Concursos insuficientes."); return
         n_minus_1 = n - 1; self.logger.info(f"N={n}, N-1={n_minus_1}")
@@ -141,7 +178,7 @@ class AnalysisOrchestrator:
         scores = calculate_scores(analysis_results);
         if scores is None: self.logger.error(f"Falha calcular scores."); return
         selected_numbers: Optional[Set[int]] = None
-        if not scores.empty: print("\n--- Pontuação Calculada V5 (Top 5) ---"); print(scores.head(5).to_string()); print("\n--- Pontuação Calculada V5 (Bottom 5) ---"); print(scores.tail(5).to_string()); selected_numbers = set(scores.nlargest(15).index); print(f"\n--- Dezenas Selecionadas (Score V5 até {n_minus_1}) ---"); print(sorted(list(selected_numbers)))
+        if not scores.empty: print("\n--- Pontuação Calculada V6 (Top 5) ---"); print(scores.head(5).to_string()); print("\n--- Pontuação Calculada V6 (Bottom 5) ---"); print(scores.tail(5).to_string()); selected_numbers = set(scores.nlargest(15).index); print(f"\n--- Dezenas Selecionadas (Score V6 até {n_minus_1}) ---"); print(sorted(list(selected_numbers)))
         else: self.logger.error("Scores vazios.")
         actual_numbers = get_draw_numbers(n);
         if actual_numbers is None: self.logger.error(f"Falha resultado real {n}."); return
@@ -152,33 +189,38 @@ class AnalysisOrchestrator:
     # --- MÉTODO run() ATUALIZADO ---
     def run(self):
         """ Método principal: Atualiza tabelas OU executa modo principal """
-        self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v5")
+        self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v6")
 
-        # Ação 1: Atualizar Tabelas Auxiliares (se pedido)
+        # Ação 1: Atualizar/Reconstruir Tabelas Auxiliares (se pedido)
         run_update_action = False
-        # Prioridade para rebuilds completos
-        if self.args.force_rebuild_cycles or self.args.force_rebuild_freq_snaps:
-             self.logger.info("Opção de rebuild detectada. Verificando/Carregando dados base primeiro...")
-             if not self._ensure_data_loaded(): self.logger.error("Dados base necessários p/ rebuild."); return
-             if self.args.force_rebuild_cycles:
-                  self.logger.info("Executando --force-rebuild-cycles...")
-                  update_cycles_table(force_rebuild=True)
-             if self.args.force_rebuild_freq_snaps:
-                  self.logger.info("Executando --force-rebuild-freq-snaps...")
-                  # Usa DEFAULT_SNAPSHOT_INTERVALS importado do config
-                  update_freq_geral_snap_table(intervals=DEFAULT_SNAPSHOT_INTERVALS, force_rebuild=True)
+        # Verifica flags de rebuild/update de ciclos
+        if self.args.update_cycles or self.args.force_rebuild_cycles:
+            self.logger.info("Verificando/Carregando dados para update/rebuild de ciclos...")
+            if not self._ensure_data_loaded(): self.logger.error("Dados base necessários."); return
+            update_cycles_table(force_rebuild=self.args.force_rebuild_cycles)
+            run_update_action = True
+        # Verifica flags de rebuild/update de snapshots de frequência geral
+        if self.args.update_freq_snaps or self.args.force_rebuild_freq_snaps:
+             if not self._ensure_data_loaded(): self.logger.error("Dados base necessários."); return
+             self.logger.info("Executando atualização/rebuild dos snapshots de frequência...")
+             update_freq_geral_snap_table(force_rebuild=self.args.force_rebuild_freq_snaps)
              run_update_action = True
-        # Se não for rebuild, verifica updates incrementais
-        elif self.args.update_cycles or self.args.update_freq_snaps:
-             if not self._ensure_data_loaded(): self.logger.error("Dados base necessários p/ update."); return
-             if self.args.update_cycles:
-                  self.logger.info("Executando --update-cycles...")
-                  update_cycles_table(force_rebuild=False)
-             if self.args.update_freq_snaps:
-                  self.logger.info("Executando --update-freq-snaps...")
-                  # Usa DEFAULT_SNAPSHOT_INTERVALS importado do config
-                  update_freq_geral_snap_table(intervals=DEFAULT_SNAPSHOT_INTERVALS, force_rebuild=False)
+        # Verifica flags de rebuild/update de chunks detalhados
+        if self.args.rebuild_chunk_freq:
+             if not self._ensure_data_loaded(): self.logger.error("Dados base necessários."); return
+             intervals_to_rebuild = []
+             if 'all' in self.args.rebuild_chunk_freq:
+                 from src.config import ALL_CHUNK_INTERVALS # Pega todos os intervalos definidos
+                 intervals_to_rebuild = ALL_CHUNK_INTERVALS
+             else:
+                 try: intervals_to_rebuild = [int(i) for i in self.args.rebuild_chunk_freq]
+                 except ValueError: self.logger.error(f"Intervalos inválidos para --rebuild-chunk-freq: {self.args.rebuild_chunk_freq}"); return
+             self.logger.info(f"Executando rebuild para chunk(s): {intervals_to_rebuild}")
+             for interval in intervals_to_rebuild:
+                 rebuild_chunk_freq_detail_table(interval_size=interval) # Chama a função do updater
              run_update_action = True
+        # if self.args.update_chunk_freq: # Lógica de update incremental (futura)
+        #      ...
 
         # Se alguma ação de update/rebuild foi executada, termina aqui.
         if run_update_action:
@@ -191,6 +233,6 @@ class AnalysisOrchestrator:
         if self.args.backtest: self._run_backtest_mode()
         elif self.args.predict_last: self._run_predict_last_mode()
         elif self.args.analysis is not None: self._run_analysis_mode()
-        else: self.logger.info("Nenhuma ação. Use --analysis, --backtest, --predict-last ou --update-*."); # Default removido
+        else: self.logger.info("Nenhuma ação principal. Use --analysis, --backtest, --predict-last ou --update-* / --rebuild-*.");
 
         self.logger.info("Aplicação Lotofacil Analysis finalizada.")

@@ -20,7 +20,9 @@ PLOT_DIR = PROJECT_ROOT / 'plots'
 # --- Configurações de Tabelas BD ---
 TABLE_NAME = 'sorteios'
 CYCLES_TABLE_NAME = 'ciclos'
-FREQ_SNAP_TABLE_NAME = 'freq_geral_snap' # <<< Nome da nova tabela
+FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
+# Prefixo para tabelas de chunk detalhadas (será seguido pelo intervalo, ex: freq_chunk_10_detail)
+FREQ_CHUNK_DETAIL_PREFIX = 'freq_chunk_'
 
 # --- Configurações de Colunas (Data Loader) ---
 ORIGINAL_COLUMNS: List[str] = ['Concurso','Data Sorteio'] + [f'Bola{i}' for i in range(1, 16)]
@@ -30,11 +32,16 @@ INT_COLUMNS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 DATE_COLUMNS: List[str] = ['data_sorteio']
 
 # --- Configurações de Análise (Padrões) ---
+# Janelas/Intervalos
 AGGREGATOR_WINDOWS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
 DEFAULT_CMD_WINDOWS: str = '10,25,50'
 DEFAULT_SNAPSHOT_INTERVALS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
 TREND_SHORT_WINDOW = 10
 TREND_LONG_WINDOW = 50
+# <<< NOVOS INTERVALOS PARA CHUNKS >>>
+STANDARD_CHUNK_INTERVALS = [10, 25, 50, 100, 200, 300, 400, 500]
+FIBONACCI_CHUNK_INTERVALS = [5, 8, 13, 21, 34, 55, 89] # Exemplo
+ALL_CHUNK_INTERVALS = sorted(list(set(STANDARD_CHUNK_INTERVALS + FIBONACCI_CHUNK_INTERVALS)))
 
 # --- Configurações de Logging ---
 LOGGING_LEVEL = logging.INFO
