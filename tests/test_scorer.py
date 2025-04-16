@@ -6,7 +6,7 @@ import numpy as np
 from typing import List, Optional, Set
 
 # Importa a função e a config V6
-from src.scorer import calculate_scores, DEFAULT_SCORING_CONFIG_V6, MISSING_CYCLE_BONUS, REPEAT_PENALTY
+from src.scorer import calculate_scores, DEFAULT_SCORING_CONFIG_V7, MISSING_CYCLE_BONUS, REPEAT_PENALTY
 # Importa ALL_NUMBERS
 try: from src.config import ALL_NUMBERS
 except ImportError: ALL_NUMBERS = list(range(1, 26))
@@ -51,7 +51,7 @@ def mock_analysis_results():
 
 def test_calculate_scores_returns_valid_series(mock_analysis_results):
     """ Testa se retorna Series válida (formato, NAs, índice) com config V6. """
-    scores = calculate_scores(mock_analysis_results, config=DEFAULT_SCORING_CONFIG_V6)
+    scores = calculate_scores(mock_analysis_results, config=DEFAULT_SCORING_CONFIG_V7)
     assert scores is not None, "Função retornou None"
     assert isinstance(scores, pd.Series), "Resultado não é Series"
     assert len(scores) == 25, f"Esperado 25 scores, obteve {len(scores)}"
@@ -61,7 +61,7 @@ def test_calculate_scores_returns_valid_series(mock_analysis_results):
 # --- TESTE COM ASSERT CORRIGIDO ---
 def test_calculate_scores_ranking_extremos(mock_analysis_results):
     """ Testa se os extremos do ranking V6 estão corretos para mock data COM penalidade. """
-    scores = calculate_scores(mock_analysis_results, config=DEFAULT_SCORING_CONFIG_V6)
+    scores = calculate_scores(mock_analysis_results, config=DEFAULT_SCORING_CONFIG_V7)
     assert scores is not None
 
     # *** ASSERT CORRIGIDO: Esperamos 2 como melhor devido à penalidade em 1 ***
@@ -84,8 +84,8 @@ def test_calculate_scores_cycle_bonus(mock_analysis_results):
     mock_copy_sem_bonus = mock_analysis_results.copy(); mock_copy_sem_bonus['missing_current_cycle'] = set()
     mock_copy_com_bonus = mock_analysis_results.copy(); mock_copy_com_bonus['missing_current_cycle'] = missing_set
 
-    scores_sem_bonus = calculate_scores(mock_copy_sem_bonus, config=DEFAULT_SCORING_CONFIG_V6)
-    scores_com_bonus = calculate_scores(mock_copy_com_bonus, config=DEFAULT_SCORING_CONFIG_V6)
+    scores_sem_bonus = calculate_scores(mock_copy_sem_bonus, config=DEFAULT_SCORING_CONFIG_V7)
+    scores_com_bonus = calculate_scores(mock_copy_com_bonus, config=DEFAULT_SCORING_CONFIG_V7)
 
     assert scores_com_bonus is not None; assert scores_sem_bonus is not None
     for dezena in missing_set: assert scores_com_bonus[dezena] == pytest.approx(scores_sem_bonus[dezena] + MISSING_CYCLE_BONUS)
@@ -97,8 +97,8 @@ def test_calculate_scores_repeat_penalty(mock_analysis_results):
      mock_copy_sem_penalty = mock_analysis_results.copy(); mock_copy_sem_penalty['numbers_in_last_draw'] = set()
      mock_copy_com_penalty = mock_analysis_results.copy(); # Já tem o set {1, 3, 5}
 
-     scores_sem_penalty = calculate_scores(mock_copy_sem_penalty, config=DEFAULT_SCORING_CONFIG_V6)
-     scores_com_penalty = calculate_scores(mock_copy_com_penalty, config=DEFAULT_SCORING_CONFIG_V6)
+     scores_sem_penalty = calculate_scores(mock_copy_sem_penalty, config=DEFAULT_SCORING_CONFIG_V7)
+     scores_com_penalty = calculate_scores(mock_copy_com_penalty, config=DEFAULT_SCORING_CONFIG_V7)
 
      assert scores_com_penalty is not None; assert scores_sem_penalty is not None
      for dezena in repeated_set: assert scores_com_penalty[dezena] == pytest.approx(scores_sem_penalty[dezena] + REPEAT_PENALTY)
@@ -110,9 +110,9 @@ def test_calculate_scores_missing_metric(mock_analysis_results):
      import copy
      results_copy = copy.deepcopy(mock_analysis_results)
      metric_to_remove = 'recent_freq_100'
-     assert metric_to_remove in DEFAULT_SCORING_CONFIG_V6
+     assert metric_to_remove in DEFAULT_SCORING_CONFIG_V7
      del results_copy[metric_to_remove]
 
-     scores = calculate_scores(results_copy, config=DEFAULT_SCORING_CONFIG_V6)
+     scores = calculate_scores(results_copy, config=DEFAULT_SCORING_CONFIG_V7)
      assert scores is not None; assert len(scores) == 25; assert not scores.isnull().any()
      print("\nScores (Métrica Faltante V6): OK")
