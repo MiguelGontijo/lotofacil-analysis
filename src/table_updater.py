@@ -15,25 +15,26 @@ from src.config import (
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 if 'DEFAULT_SNAPSHOT_INTERVALS' not in globals(): DEFAULT_SNAPSHOT_INTERVALS = [10, 25, 50, 100, 200, 300, 400, 500]
 if 'NEW_BALL_COLUMNS' not in globals(): NEW_BALL_COLUMNS = [f'b{i}' for i in range(1,16)]
+if 'TABLE_NAME' not in globals(): TABLE_NAME = 'sorteios'
 
 # Importa funções do DB Manager
 from src.database_manager import (
     read_data_from_db, get_last_freq_snapshot_contest, save_freq_snapshot,
     get_closest_freq_snapshot, create_freq_snap_table, FREQ_SNAP_TABLE_NAME,
-    create_chunk_freq_table, save_chunk_freq_row, get_chunk_table_name
+    create_chunk_stats_final_table, save_chunk_final_stats_row, # <<< Novas
+    get_last_contest_in_chunk_stats_final, get_chunk_final_stats_table_name # <<< Novas
 )
 
 BASE_COLS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 
 
-# --- update_freq_geral_snap_table (Função de Snapshot - Mantida igual) ---
-def update_freq_geral_snap_table(intervals: List[int] = DEFAULT_SNAPSHOT_INTERVALS,
-                                 force_rebuild: bool = False):
-    # (Código idêntico ao da última versão correta)
+# --- update_freq_geral_snap_table ---
+# (Código idêntico ao da última versão correta)
+def update_freq_geral_snap_table(intervals: List[int] = DEFAULT_SNAPSHOT_INTERVALS, force_rebuild: bool = False):
     logger.info(f"Iniciando atualização snapshots de frequência geral...")
     create_freq_snap_table(); last_snapshot_contest = 0; current_freq_counts = pd.Series(0, index=ALL_NUMBERS)
     if force_rebuild:
-        logger.warning(f"REBUILD: Apagando snapshots de '{FREQ_SNAP_TABLE_NAME}'.")
+        logger.warning(f"REBUILD: Apagando snapshots de '{FREQ_SNAP_TABLE_NAME}'.");
         try:
             with sqlite3.connect(DATABASE_PATH) as conn: conn.execute(f"DELETE FROM {FREQ_SNAP_TABLE_NAME};")
         except sqlite3.Error as e: logger.error(f"Erro limpar '{FREQ_SNAP_TABLE_NAME}': {e}"); return
@@ -71,63 +72,84 @@ def update_freq_geral_snap_table(intervals: List[int] = DEFAULT_SNAPSHOT_INTERVA
             snapshots_saved_count += 1; snapshot_idx += 1
             if snapshots_saved_count % 50 == 0: logger.info(f"{snapshots_saved_count}/{len(sorted_snapshot_points)} snapshots salvos...")
         if processed_count % 500 == 0: logger.info(f"Processados {processed_count}/{len(df_new_draws)} sorteios...")
-    logger.info(f"Atualização/Reconstrução de '{FREQ_SNAP_TABLE_NAME}' concluída. {snapshots_saved_count} snapshots salvos/atualizados.")
+    logger.info(f"Atualização/Reconstrução de '{FREQ_SNAP_TABLE_NAME}' concluída. {snapshots_saved_count} snapshots.")
 
 
-# --- FUNÇÃO REBUILD CHUNK ATUALIZADA ---
-def rebuild_chunk_freq_detail_table(interval_size: int):
-    """ Reconstrói COMPLETAMENTE a tabela de frequência detalhada por chunk. """
-    table_name = get_chunk_table_name(interval_size)
-    logger.info(f"Iniciando reconstrução completa da tabela '{table_name}'...")
+# --- NOVA FUNÇÃO PARA STATS FINAIS DE CHUNK ---
+def update_chunk_final_stats_table(interval_size: int, force_rebuild: bool = False):
+    """
+    Calcula e salva as estatísticas FINAIS (freq, rank) de cada bloco completo.
+    Args:
+        interval_size (int): Tamanho do bloco.
+        force_rebuild (bool): Se True, reconstrói do zero.
+    """
+    table_name = get_chunk_final_stats_table_name(interval_size)
+    logger.info(f"Iniciando atualização/rebuild da tabela '{table_name}'...")
 
-    create_chunk_freq_table(interval_size) # Garante que a tabela exista
-    try:
-        with sqlite3.connect(DATABASE_PATH) as conn:
-            conn.execute(f"DELETE FROM {table_name};") # Limpa dados antigos
-            logger.warning(f"Dados antigos de '{table_name}' apagados para reconstrução.")
-    except sqlite3.Error as e: logger.error(f"Erro ao limpar '{table_name}': {e}"); return
+    create_chunk_stats_final_table(interval_size) # Garante que a tabela exista
 
-    df_all_draws = read_data_from_db(table_name=TABLE_NAME, columns=BASE_COLS) # Lê todos os sorteios
-    if df_all_draws is None or df_all_draws.empty: logger.error("Dados de sorteios não encontrados."); return
+    last_processed_chunk_end = 0 # Começa do zero se for rebuild ou tabela vazia
+    if force_rebuild:
+        logger.warning(f"REBUILD: Apagando dados de '{table_name}'.")
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn: conn.execute(f"DELETE FROM {table_name};")
+        except sqlite3.Error as e: logger.error(f"Erro ao limpar '{table_name}': {e}"); return
+    else:
+        # Descobre o último concurso final de chunk já processado e salvo
+        last_processed_val = get_last_contest_in_chunk_stats_final(interval_size)
+        if last_processed_val is not None:
+            last_processed_chunk_end = last_processed_val
+            logger.info(f"Último chunk final processado para intervalo {interval_size}: {last_processed_chunk_end}")
+        else:
+             logger.info(f"Nenhum chunk final encontrado para intervalo {interval_size}. Calculando do início.")
 
-    logger.info(f"Processando {len(df_all_draws)} sorteios para popular '{table_name}'...")
+    # Determina a partir de qual concurso ler os sorteios
+    # Precisamos ler desde o início do PRIMEIRO chunk incompleto
+    start_processing_from = last_processed_chunk_end + 1
+
+    df_new_draws = read_data_from_db(table_name=TABLE_NAME, columns=BASE_COLS, concurso_minimo=start_processing_from)
+
+    if df_new_draws is None or df_new_draws.empty:
+        logger.info(f"Nenhum sorteio novo encontrado após {last_processed_chunk_end}. Tabela '{table_name}' atualizada.")
+        return
+
+    max_contest_in_data = int(df_new_draws['concurso'].max())
+    logger.info(f"Processando {len(df_new_draws)} sorteios ({start_processing_from} a {max_contest_in_data}) para chunks de {interval_size}...")
 
     current_chunk_counts = pd.Series(0, index=ALL_NUMBERS).astype(int)
-    # Determina o primeiro concurso real nos dados lidos
-    first_concurso_in_data = int(df_all_draws['concurso'].iloc[0]) if not df_all_draws.empty else 1
+    current_chunk_start_contest = ((start_processing_from - 1) // interval_size) * interval_size + 1
+    chunks_saved_count = 0
 
-    processed_count = 0
-    # Itera sobre os sorteios
-    for index, row in df_all_draws.iterrows():
+    # Itera sobre os novos sorteios
+    for index, row in df_new_draws.iterrows():
         current_concurso_val = row['concurso']
         if pd.isna(current_concurso_val): continue
         current_concurso = int(current_concurso_val)
         drawn_numbers = {int(num) for num in row[NEW_BALL_COLUMNS].dropna().values}
 
-        # --- LÓGICA DE RESET DO CHUNK CORRIGIDA ---
-        # Novo chunk começa se (concurso - primeiro_concurso) é múltiplo do intervalo E não é o primeiro concurso
-        # Ou mais simples: (concurso - 1) % intervalo == 0 (considerando que começam em 1)
+        # Verifica se este concurso inicia um novo chunk (exceto o primeiríssimo)
         is_start_of_new_chunk = (current_concurso - 1) % interval_size == 0
+        if is_start_of_new_chunk and current_concurso != start_processing_from:
+            # Este é o início de um NOVO chunk, o anterior acabou no concurso `current_concurso - 1`.
+            # Mas só salvamos quando o chunk REALMENTE termina (múltiplo do intervalo)
+            # A lógica de salvar está no if abaixo. Aqui só precisamos resetar.
+            logger.debug(f"Resetando contagem para novo chunk {interval_size} no concurso {current_concurso}")
+            current_chunk_counts = pd.Series(0, index=ALL_NUMBERS).astype(int)
+            current_chunk_start_contest = current_concurso
 
-        if is_start_of_new_chunk and current_concurso != first_concurso_in_data:
-             logger.debug(f"Resetando contagem para novo chunk de {interval_size} no concurso {current_concurso}")
-             current_chunk_counts = pd.Series(0, index=ALL_NUMBERS).astype(int)
-        # ------------------------------------------
-
-        # Incrementa a contagem para os números sorteados NESTE concurso
+        # Incrementa contagem CUMULATIVA dentro do chunk atual
         for num in drawn_numbers:
             if num in current_chunk_counts.index:
                 current_chunk_counts[num] += 1
 
-        # Salva a linha com a contagem CUMULATIVA ATÉ ESTE PONTO DENTRO DO CHUNK ATUAL
-        save_chunk_freq_row(current_concurso, current_chunk_counts.copy(), interval_size)
+        # Verifica se este concurso é o FIM de um chunk
+        if current_concurso % interval_size == 0:
+            logger.debug(f"Fim do chunk {interval_size} detectado no concurso {current_concurso}. Calculando e salvando stats...")
+            # Calcula o rank baseado na frequência acumulada deste chunk
+            ranks = current_chunk_counts.rank(method='min', ascending=False, pct=False).astype(int)
+            # Salva a frequência final E o rank final deste chunk
+            save_chunk_final_stats_row(interval_size, current_concurso, current_chunk_counts.copy(), ranks.copy())
+            chunks_saved_count += 1
+            if chunks_saved_count % 50 == 0: logger.info(f"{chunks_saved_count} chunks finais de {interval_size} salvos...")
 
-        processed_count += 1
-        if processed_count % 500 == 0:
-             logger.info(f"Processados {processed_count}/{len(df_all_draws)} sorteios para '{table_name}'...")
-
-    logger.info(f"Reconstrução completa da tabela '{table_name}' concluída.")
-
-
-# Função de update incremental (AINDA NÃO IMPLEMENTADA)
-# def update_chunk_freq_detail_table(interval_size: int): ...
+    logger.info(f"Atualização/Reconstrução da tabela '{table_name}' concluída. {chunks_saved_count} chunks finais salvos/atualizados.")

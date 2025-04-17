@@ -21,15 +21,15 @@ PLOT_DIR = PROJECT_ROOT / 'plots'
 TABLE_NAME = 'sorteios'
 CYCLES_TABLE_NAME = 'ciclos'
 FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
-FREQ_CHUNK_DETAIL_PREFIX = 'freq_chunk_'
+# FREQ_CHUNK_DETAIL_PREFIX = 'freq_chunk_' # Prefixo para tabelas detalhadas (adiado)
+CHUNK_STATS_FINAL_PREFIX = 'chunk_stats_' # <<< Prefixo para tabelas de stats finais por chunk
 
-# --- Configurações de Colunas ---
+# --- Configurações de Colunas (Data Loader) ---
 ORIGINAL_COLUMNS: List[str] = ['Concurso','Data Sorteio'] + [f'Bola{i}' for i in range(1, 16)]
 NEW_BALL_COLUMNS: List[str] = [f'b{i}' for i in range(1, 16)]
 COLUMN_MAPPING: Dict[str, str] = {'Concurso': 'concurso', 'Data Sorteio': 'data_sorteio', **{f'Bola{i}': f'b{i}' for i in range(1, 16)}}
 INT_COLUMNS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 DATE_COLUMNS: List[str] = ['data_sorteio']
-# <<< BASE_COLS DEFINIDO AQUI >>>
 BASE_COLS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 
 # --- Configurações de Análise (Padrões) ---

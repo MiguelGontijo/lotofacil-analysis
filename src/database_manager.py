@@ -10,7 +10,7 @@ import sys
 # Importa do config
 from src.config import (
     DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME, FREQ_SNAP_TABLE_NAME,
-    FREQ_CHUNK_DETAIL_PREFIX,
+    CHUNK_STATS_FINAL_PREFIX, # <<< Novo prefixo
     logger, NEW_BALL_COLUMNS, ALL_NUMBERS
 )
 
@@ -18,6 +18,7 @@ from src.config import (
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 
 # --- Funções save_to_db, read_data_from_db, get_draw_numbers ---
+# (Código completo e correto das versões anteriores)
 def save_to_db(df: pd.DataFrame, table_name: str, db_path: Path = DATABASE_PATH, if_exists: str = 'replace') -> bool:
     logger.info(f"Salvando dados '{table_name}' (if_exists='{if_exists}')...")
     if df is None or df.empty: logger.warning(f"DataFrame '{table_name}' vazio."); return False
@@ -37,7 +38,7 @@ def read_data_from_db(db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAM
             if conditions: sql_query += " WHERE " + " AND ".join(conditions)
             sql_query += " ORDER BY concurso ASC;"
             df = pd.read_sql_query(sql_query, conn, params=params)
-            if not df.empty:
+            if not df.empty: # Reapply types
                  if 'data_sorteio' in df.columns: df['data_sorteio'] = pd.to_datetime(df['data_sorteio'], errors='coerce')
                  for col in df.columns:
                      if col == 'concurso' or col in NEW_BALL_COLUMNS: df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
@@ -55,32 +56,17 @@ def get_draw_numbers(concurso: int, db_path: Path = DATABASE_PATH, table_name: s
     except Exception as e: logger.error(f"Erro buscar dezenas {concurso}: {e}"); return None
 
 # --- Funções de Ciclo ---
-# <<< FUNÇÃO CORRIGIDA >>>
 def create_cycles_table(db_path: Path = DATABASE_PATH):
-    """ Cria a tabela 'ciclos' com schema completo se não existir. """
     try:
-        with sqlite3.connect(db_path) as conn:
-            sql_create = f"""
-            CREATE TABLE IF NOT EXISTS {CYCLES_TABLE_NAME} (
-                numero_ciclo INTEGER PRIMARY KEY,
-                concurso_inicio INTEGER NOT NULL,
-                concurso_fim INTEGER NOT NULL UNIQUE,
-                duracao INTEGER NOT NULL
-            ); """ # Schema completo
-            conn.execute(sql_create)
-            logger.info(f"Tabela '{CYCLES_TABLE_NAME}' verificada/criada.")
-    except sqlite3.Error as e:
-        logger.error(f"Erro ao criar/verificar '{CYCLES_TABLE_NAME}': {e}")
-
+        with sqlite3.connect(db_path) as conn: sql_create = f"""CREATE TABLE IF NOT EXISTS {CYCLES_TABLE_NAME} (numero_ciclo INTEGER PRIMARY KEY, concurso_inicio INTEGER NOT NULL, concurso_fim INTEGER NOT NULL UNIQUE, duracao INTEGER NOT NULL);"""; conn.execute(sql_create); logger.info(f"Tabela '{CYCLES_TABLE_NAME}' ok.")
+    except sqlite3.Error as e: logger.error(f"Erro criar/verificar '{CYCLES_TABLE_NAME}': {e}")
 def get_last_cycle_end(db_path: Path = DATABASE_PATH) -> Optional[int]:
-    # (Código idêntico ao da última versão)
     create_cycles_table(db_path); cycles_table_name = CYCLES_TABLE_NAME
     try:
         with sqlite3.connect(db_path) as conn: result = conn.execute(f"SELECT MAX(concurso_fim) FROM {cycles_table_name}").fetchone(); return int(result[0]) if result and result[0] is not None else None
     except sqlite3.Error as e: logger.error(f"Erro buscar último fim de ciclo: {e}"); return None
 
 # --- Funções para Snapshots de Frequência ---
-# (Código idêntico ao da última versão correta)
 def create_freq_snap_table(db_path: Path = DATABASE_PATH):
     try:
         with sqlite3.connect(db_path) as conn: col_defs = ', '.join([f'd{i} INTEGER NOT NULL' for i in ALL_NUMBERS]); sql_create = f"""CREATE TABLE IF NOT EXISTS {FREQ_SNAP_TABLE_NAME} (concurso_snap INTEGER PRIMARY KEY, {col_defs});"""; conn.execute(sql_create); logger.info(f"Tabela '{FREQ_SNAP_TABLE_NAME}' ok.")
@@ -104,7 +90,7 @@ def get_closest_freq_snapshot(concurso: int, db_path: Path = DATABASE_PATH) -> O
                         if isinstance(count_val, int): freq_data[dezena] = count_val
                         elif isinstance(count_val, bytes): freq_data[dezena] = int.from_bytes(count_val, byteorder=sys.byteorder, signed=False);
                         else: freq_data[dezena] = 0 if count_val is None or pd.isna(count_val) else int(count_val)
-                    except Exception as e: logger.error(f"Erro converter snap d{dezena}, c={snap_concurso}: {e}. Usando 0."); freq_data[dezena] = 0
+                    except Exception as e: logger.error(f"Erro converter snap d{dezena}, c={snap_concurso}: {e}."); freq_data[dezena] = 0
                 freq_series = pd.Series(freq_data).reindex(ALL_NUMBERS, fill_value=0).astype(int); logger.debug(f"Snapshot encontrado: {snap_concurso}"); return snap_concurso, freq_series
             else: logger.debug(f"Nenhum snapshot <= {concurso}."); return None
     except Exception as e: logger.error(f"Erro buscar snapshot freq: {e}"); return None
@@ -115,44 +101,69 @@ def save_freq_snapshot(concurso_snap: int, freq_series: pd.Series, db_path: Path
     try:
         with sqlite3.connect(db_path) as conn:
             col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS]; placeholders = ', '.join(['?'] * (len(ALL_NUMBERS) + 1)); values_ordered = [freq_series.get(i, 0) for i in ALL_NUMBERS]
-            sql_insert_replace = f"INSERT OR REPLACE INTO {FREQ_SNAP_TABLE_NAME} ({', '.join(col_names)}) VALUES ({placeholders});"; values_to_insert = [concurso_snap] + values_ordered
-            conn.execute(sql_insert_replace, values_to_insert); conn.commit(); logger.debug(f"Snapshot {concurso_snap} salvo/atualizado.")
+            sql = f"INSERT OR REPLACE INTO {FREQ_SNAP_TABLE_NAME} ({', '.join(col_names)}) VALUES ({placeholders});"; values = [concurso_snap] + values_ordered
+            conn.execute(sql, values); conn.commit(); #logger.debug(f"Snapshot {concurso_snap} salvo.")
     except Exception as e: logger.error(f"Erro salvar snapshot {concurso_snap}: {e}")
 
-# --- Funções para Tabelas de Chunk Detalhadas ---
-def get_chunk_table_name(interval_size: int) -> str:
-    # (Código idêntico ao da última versão)
-    return f"{FREQ_CHUNK_DETAIL_PREFIX}{interval_size}_detail"
-def create_chunk_freq_table(interval_size: int, db_path: Path = DATABASE_PATH):
-    # (Código idêntico ao da última versão)
-    table_name = get_chunk_table_name(interval_size)
-    try:
-        with sqlite3.connect(db_path) as conn: col_defs = ', '.join([f'd{i} INTEGER NOT NULL' for i in ALL_NUMBERS]); sql_create = f"""CREATE TABLE IF NOT EXISTS {table_name} (concurso INTEGER PRIMARY KEY, {col_defs});"""; conn.execute(sql_create); logger.info(f"Tabela '{table_name}' verificada/criada.")
-    except sqlite3.Error as e: logger.error(f"Erro criar/verificar '{table_name}': {e}")
-def get_last_contest_in_chunk_table(interval_size: int, db_path: Path = DATABASE_PATH) -> Optional[int]:
-    # (Código idêntico ao da última versão)
-    table_name = get_chunk_table_name(interval_size); create_chunk_freq_table(interval_size, db_path)
-    try:
-        with sqlite3.connect(db_path) as conn: result = conn.execute(f"SELECT MAX(concurso) FROM {table_name}").fetchone(); return int(result[0]) if result and result[0] is not None else None
-    except sqlite3.Error as e: logger.error(f"Erro buscar último concurso em '{table_name}': {e}"); return None
-def save_chunk_freq_row(concurso: int, freq_counts_series: pd.Series, interval_size: int, db_path: Path = DATABASE_PATH):
-    # (Código idêntico ao da última versão)
-    table_name = get_chunk_table_name(interval_size); create_chunk_freq_table(interval_size, db_path)
-    if freq_counts_series is None or len(freq_counts_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série freq inválida p/ chunk {interval_size}, c={concurso}."); return
-    logger.debug(f"Salvando freq chunk {interval_size} c={concurso}...")
+# --- NOVAS FUNÇÕES PARA TABELA DE STATS FINAIS DE CHUNK ---
+def get_chunk_final_stats_table_name(interval_size: int) -> str:
+    """ Gera o nome da tabela de stats finais de chunk. """
+    return f"{CHUNK_STATS_FINAL_PREFIX}{interval_size}_final"
+
+def create_chunk_stats_final_table(interval_size: int, db_path: Path = DATABASE_PATH):
+    """ Cria a tabela de stats finais por chunk para um intervalo específico. """
+    table_name = get_chunk_final_stats_table_name(interval_size)
     try:
         with sqlite3.connect(db_path) as conn:
-            col_names = ['concurso'] + [f'd{i}' for i in ALL_NUMBERS]; placeholders = ', '.join(['?'] * (len(ALL_NUMBERS) + 1)); values_ordered = [freq_counts_series.get(i, 0) for i in ALL_NUMBERS]
-            sql = f"INSERT OR REPLACE INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders});"; values = [concurso] + values_ordered
+            freq_col_defs = ', '.join([f'd{i}_freq INTEGER' for i in ALL_NUMBERS]) # Permite NULL? Melhor NOT NULL default 0
+            rank_col_defs = ', '.join([f'd{i}_rank INTEGER' for i in ALL_NUMBERS])
+            # Outras colunas podem ser adicionadas aqui depois (ex: avg_delay, std_dev_delay, etc.)
+            sql_create = f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                concurso_fim INTEGER PRIMARY KEY,
+                {freq_col_defs},
+                {rank_col_defs}
+            );
+            """
+            conn.execute(sql_create)
+            logger.info(f"Tabela '{table_name}' verificada/criada.")
+    except sqlite3.Error as e:
+        logger.error(f"Erro ao criar/verificar tabela '{table_name}': {e}")
+
+def get_last_contest_in_chunk_stats_final(interval_size: int, db_path: Path = DATABASE_PATH) -> Optional[int]:
+    """ Busca o último concurso_fim registrado na tabela de stats finais de chunk. """
+    table_name = get_chunk_final_stats_table_name(interval_size)
+    create_chunk_stats_final_table(interval_size, db_path) # Garante que exista
+    try:
+        with sqlite3.connect(db_path) as conn:
+            result = conn.execute(f"SELECT MAX(concurso_fim) FROM {table_name}").fetchone()
+            return int(result[0]) if result and result[0] is not None else None
+    except sqlite3.Error as e:
+        logger.error(f"Erro ao buscar último concurso em '{table_name}': {e}")
+        return None
+
+def save_chunk_final_stats_row(interval_size: int, concurso_fim: int,
+                               freq_series: pd.Series, rank_series: pd.Series,
+                               db_path: Path = DATABASE_PATH):
+    """ Salva (INSERT OR REPLACE) uma linha na tabela de stats finais de chunk. """
+    table_name = get_chunk_final_stats_table_name(interval_size)
+    create_chunk_stats_final_table(interval_size, db_path)
+    # Validações
+    if freq_series is None or len(freq_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série freq inválida p/ chunk {interval_size}, c={concurso_fim}."); return
+    if rank_series is None or len(rank_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série rank inválida p/ chunk {interval_size}, c={concurso_fim}."); return
+
+    logger.debug(f"Salvando stats finais chunk {interval_size} para concurso {concurso_fim}...")
+    try:
+        with sqlite3.connect(db_path) as conn:
+            freq_cols = [f'd{i}_freq' for i in ALL_NUMBERS]
+            rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
+            col_names = ['concurso_fim'] + freq_cols + rank_cols
+            placeholders = ', '.join(['?'] * len(col_names))
+            # Pega valores na ordem correta 1-25
+            freq_values = [freq_series.get(i, 0) for i in ALL_NUMBERS]
+            rank_values = [rank_series.get(i, 0) for i in ALL_NUMBERS] # Assumindo rank é int
+            sql = f"INSERT OR REPLACE INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders});"
+            values = [concurso_fim] + freq_values + rank_values
             conn.execute(sql, values); conn.commit()
-    except Exception as e: logger.error(f"Erro salvar chunk {interval_size} c={concurso}: {e}")
-def get_chunk_freq_row(concurso: int, interval_size: int, db_path: Path = DATABASE_PATH) -> Optional[pd.Series]:
-    # (Código idêntico ao da última versão)
-    table_name = get_chunk_table_name(interval_size); logger.debug(f"Lendo freq chunk {interval_size} c={concurso}...")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            col_names = [f'd{i}' for i in ALL_NUMBERS]; sql = f"SELECT {', '.join(col_names)} FROM {table_name} WHERE concurso = ?"
-            result = conn.execute(sql, (concurso,)).fetchone()
-            if result: freq_data = {num: int(count or 0) for num, count in zip(ALL_NUMBERS, result)}; return pd.Series(freq_data).astype(int)
-            else: return None
-    except sqlite3.Error as e: logger.error(f"Erro ler chunk {interval_size} c={concurso}: {e}"); return None
+    except sqlite3.Error as e: logger.error(f"Erro SQLite ao salvar chunk stats {interval_size}, c={concurso_fim}: {e}")
+    except Exception as e: logger.error(f"Erro inesperado ao salvar chunk stats {interval_size}, c={concurso_fim}: {e}")
