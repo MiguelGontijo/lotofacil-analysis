@@ -8,30 +8,20 @@ from typing import Optional, List, Dict
 
 # Importa do config e db_manager
 from src.config import logger, ALL_NUMBERS, DATABASE_PATH
-# Importa a função de nome de tabela e criação (para garantir)
 from src.database_manager import get_chunk_final_stats_table_name, create_chunk_stats_final_table
 
 # Fallback
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 
-
 def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
     """
     Lê as estatísticas finais salvas para cada bloco completo de tamanho 'interval_size'
     até 'concurso_maximo' da tabela correspondente.
-
-    Args:
-        interval_size (int): Tamanho do bloco (ex: 10, 25).
-        concurso_maximo (Optional[int]): Último concurso final de chunk a considerar.
-
-    Returns:
-        Optional[pd.DataFrame]: DataFrame indexado por 'concurso_fim',
-                                com colunas _freq e _rank, ou None se erro.
-                                Retorna DataFrame vazio se nenhum chunk completo for encontrado.
     """
     table_name = get_chunk_final_stats_table_name(interval_size)
-    logger.info(f"Buscando estatísticas finais dos chunks de {interval_size} na tabela '{table_name}'...")
-    create_chunk_stats_final_table(interval_size) # Garante que a tabela exista
+    logger.info(f"Buscando stats finais chunks de {interval_size} em '{table_name}'...")
+    # Garante que a tabela exista (não cria se não existir neste ponto)
+    # create_chunk_stats_final_table(interval_size) # Removido - Assume que updater já criou
 
     db_path = DATABASE_PATH
     freq_cols = [f'd{i}_freq' for i in ALL_NUMBERS]
@@ -41,9 +31,12 @@ def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = N
 
     try:
         with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
+            if cursor.fetchone() is None: logger.error(f"Tabela '{table_name}' não encontrada."); return None # Retorna None se tabela não existe
+
             sql_query = f"SELECT {all_cols_str} FROM {table_name}"; params = []
             if concurso_maximo is not None:
-                # Filtra pelos concursos finais de chunk que são <= concurso_maximo
                 sql_query += " WHERE concurso_fim <= ?"
                 params.append(concurso_maximo)
             sql_query += " ORDER BY concurso_fim ASC;"
@@ -51,18 +44,73 @@ def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = N
             df_stats = pd.read_sql_query(sql_query, conn, params=params)
             logger.info(f"{len(df_stats)} registros de stats finais de chunk lidos.")
 
-            if df_stats.empty: return pd.DataFrame(columns=all_cols).set_index('concurso_fim') # Retorna DF vazio com colunas
+            if df_stats.empty: return pd.DataFrame(columns=all_cols).set_index('concurso_fim')
 
-            # Garante tipos corretos (todos devem ser inteiros)
+            # Garante tipos corretos
             df_stats.set_index('concurso_fim', inplace=True)
             for col in df_stats.columns:
                 df_stats[col] = pd.to_numeric(df_stats[col], errors='coerce').fillna(0).astype(int)
-
             return df_stats
 
     except sqlite3.Error as e: logger.error(f"Erro SQLite ao ler '{table_name}': {e}"); return None
     except Exception as e: logger.error(f"Erro inesperado em get_chunk_final_stats: {e}"); return None
 
 
-# --- Funções futuras ---
-# def calculate_historical_rank_stats(...): ...
+# --- NOVA FUNÇÃO ---
+def calculate_historical_rank_stats(interval_size: int, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
+    """
+    Calcula estatísticas (média, std dev) sobre o RANK histórico das dezenas
+    nos chunks completos de um determinado intervalo.
+
+    Args:
+        interval_size (int): Tamanho do bloco (ex: 10).
+        concurso_maximo (Optional[int]): Último concurso final de chunk a considerar.
+
+    Returns:
+        Optional[pd.DataFrame]: DataFrame indexado por dezena (1-25) com colunas
+                                 'avg_rank_chunk{I}', 'std_rank_chunk{I}',
+                                 ou None se erro ou sem dados suficientes.
+    """
+    logger.info(f"Calculando stats históricos de rank para chunks de {interval_size}...")
+
+    # 1. Obtém os ranks finais de cada chunk completo
+    df_chunk_stats = get_chunk_final_stats(interval_size, concurso_maximo)
+
+    if df_chunk_stats is None:
+        logger.error("Falha ao obter stats finais dos chunks.")
+        return None
+    if df_chunk_stats.empty or len(df_chunk_stats) < 2: # Precisa de pelo menos 2 chunks para std dev
+        logger.warning(f"Dados insuficientes ({len(df_chunk_stats)} chunks) para calcular stats históricos de rank para intervalo {interval_size}.")
+        # Retorna DF com NaNs ou zeros? Vamos com NaNs para indicar falta de dados
+        nan_series = pd.Series(np.nan, index=ALL_NUMBERS)
+        return pd.DataFrame({
+            f'avg_rank_chunk{interval_size}': nan_series,
+            f'std_rank_chunk{interval_size}': nan_series
+        }, index=pd.Index(ALL_NUMBERS, name='dezena'))
+
+    # 2. Seleciona apenas as colunas de rank
+    rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
+    # Verifica se todas as colunas de rank existem
+    if not all(col in df_chunk_stats.columns for col in rank_cols):
+        logger.error(f"Colunas de rank esperadas não encontradas no DataFrame de chunk stats para intervalo {interval_size}.")
+        return None
+    df_ranks_only = df_chunk_stats[rank_cols]
+
+    # 3. Calcula Média e Desvio Padrão para o rank de cada dezena (ao longo das linhas/chunks)
+    # axis=0 calcula a estatística para cada coluna (d1_rank, d2_rank, ...)
+    avg_ranks = df_ranks_only.mean(axis=0, skipna=True)
+    std_ranks = df_ranks_only.std(axis=0, skipna=True, ddof=1) # ddof=1 para desvio padrão amostral
+
+    # 4. Formata o resultado em um DataFrame indexado por dezena
+    stats_data = []
+    for i in ALL_NUMBERS:
+        col_rank = f'd{i}_rank'
+        stats_data.append({
+            'dezena': i,
+            f'avg_rank_chunk{interval_size}': avg_ranks.get(col_rank, np.nan),
+            f'std_rank_chunk{interval_size}': std_ranks.get(col_rank, np.nan)
+        })
+
+    results_df = pd.DataFrame(stats_data).set_index('dezena')
+    logger.info(f"Stats históricos de rank para chunks de {interval_size} calculados.")
+    return results_df
