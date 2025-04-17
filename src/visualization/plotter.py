@@ -1,103 +1,112 @@
 # src/visualization/plotter.py
 
-import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+import seaborn as sns # Opcional para estilos
+import pandas as pd
 from pathlib import Path
-import logging
-from src.config import logger
+from typing import Optional, Dict, Any
 
-PLOT_OUTPUT_DIR = Path(__file__).parent.parent.parent / 'plots'
+from src.config import logger, PLOT_DIR
+
+# Configurações de Plot
+DEFAULT_FIGSIZE = (10, 6)
+DEFAULT_DPI = 100
+
+def _setup_plot_style():
+    """ Configura estilo visual dos gráficos (opcional). """
+    try:
+        sns.set_theme(style="whitegrid") # Usa tema do Seaborn se disponível
+        logger.debug("Estilo Seaborn aplicado aos gráficos.")
+    except NameError:
+        logger.debug("Seaborn não disponível, usando estilo padrão Matplotlib.")
+        plt.style.use('ggplot') # Ou outro estilo matplotlib
+
+def _save_plot(filename: str, tight_layout: bool = True):
+    """ Salva o gráfico atual em um arquivo no diretório de plots. """
+    if not filename: return
+    # Garante que o diretório de plots exista
+    PLOT_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = PLOT_DIR / f"{filename}.png"
+    try:
+        if tight_layout:
+            plt.tight_layout()
+        plt.savefig(filepath, dpi=DEFAULT_DPI, bbox_inches='tight')
+        logger.info(f"Gráfico salvo em: {filepath}")
+    except Exception as e:
+        logger.error(f"Erro ao salvar gráfico '{filepath}': {e}")
+    finally:
+        plt.close() # Fecha a figura para liberar memória
 
 def setup_plotting():
-    sns.set_theme(style="whitegrid")
-    PLOT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    """ Função chamada no início para configurar algo se necessário. """
+    _setup_plot_style()
+    logger.info("Setup de plotagem inicializado.")
 
-def _save_plot(filename: str, title: str):
-    full_path = PLOT_OUTPUT_DIR / f"{filename}.png"
-    try:
-        plt.tight_layout()
-        plt.savefig(full_path)
-        logger.info(f"Plot salvo: {full_path}")
-    except Exception as e:
-        logger.error(f"Erro ao salvar o plot '{filename}.png': {e}")
-    finally:
-        plt.close()
+# --- Funções de Plot Específicas ---
 
-def plot_frequency_bar(freq_series: pd.Series, title: str, filename: str):
-    if freq_series is None or freq_series.empty: return
-    logger.debug(f"Gerando plot de frequência: {title}")
-    plt.figure(figsize=(12, 6))
-    # --- AJUSTE AQUI ---
-    # Usando hue=freq_series.index para colorir por dezena e legend=False
-    bars = sns.barplot(x=freq_series.index, y=freq_series.values,
-                       hue=freq_series.index, palette="viridis", legend=False)
-    # --- FIM AJUSTE ---
-    plt.title(title, fontsize=16)
-    plt.xlabel("Dezena", fontsize=12)
+def plot_backtest_summary(summary_data: Dict[int | str, int], title: str, filename: str):
+    """
+    (Ainda não implementada - Causa o Warning na inicialização)
+    Plota o resumo dos acertos de um backtest.
+    """
+    # TODO: Implementar lógica para gerar gráfico de barras com acertos (11 a 15)
+    logger.warning(f"Função plot_backtest_summary ainda não implementada. Gráfico '{filename}' não gerado.")
+    pass
+
+
+def plot_histogram(data: pd.Series, title: str, xlabel: str, filename: str, bins: int = 15):
+    """
+    Plota um histograma para uma Series de dados.
+
+    Args:
+        data (pd.Series): Os dados a serem plotados.
+        title (str): Título do gráfico.
+        xlabel (str): Rótulo do eixo X.
+        filename (str): Nome do arquivo para salvar (sem extensão).
+        bins (int): Número de barras no histograma.
+    """
+    if data is None or data.empty:
+        logger.warning(f"Dados vazios ou nulos para plotar histograma '{title}'.")
+        return
+
+    plt.figure(figsize=DEFAULT_FIGSIZE)
+    # Remove NaNs antes de plotar
+    data_cleaned = data.dropna()
+    if data_cleaned.empty:
+         logger.warning(f"Todos os dados eram nulos para histograma '{title}'.")
+         plt.close(); return
+
+    plt.hist(data_cleaned, bins=bins, edgecolor='black')
+    plt.title(title, fontsize=14)
+    plt.xlabel(xlabel, fontsize=12)
     plt.ylabel("Frequência", fontsize=12)
-    plt.xticks(ticks=range(len(freq_series.index)), labels=freq_series.index, rotation=0)
-    for bar in bars.patches:
-         bars.annotate(f"{bar.get_height():.0f}", (bar.get_x() + bar.get_width() / 2., bar.get_height()),
-                       ha='center', va='center', size=8, xytext=(0, 5), textcoords='offset points')
-    _save_plot(filename, title)
+    plt.grid(axis='y', alpha=0.75)
+    _save_plot(filename)
 
-def plot_distribution_bar(dist_series: pd.Series, title: str, filename: str):
-    if dist_series is None or dist_series.empty: return
-    logger.debug(f"Gerando plot de distribuição: {title}")
-    plt.figure(figsize=(10, 6))
-    # --- AJUSTE AQUI ---
-    # Usando hue=dist_series.index para colorir por categoria e legend=False
-    bars = sns.barplot(x=dist_series.index, y=dist_series.values,
-                       hue=dist_series.index, palette="magma", order=dist_series.index, legend=False)
-    # --- FIM AJUSTE ---
-    plt.title(title, fontsize=16)
-    plt.xlabel("Distribuição", fontsize=12)
-    plt.ylabel("Número de Ocorrências", fontsize=12)
-    plt.xticks(rotation=45, ha='right')
-    for bar in bars.patches:
-         bars.annotate(f"{bar.get_height():.0f}", (bar.get_x() + bar.get_width() / 2., bar.get_height()),
-                       ha='center', va='center', size=9, xytext=(0, 5), textcoords='offset points')
-    _save_plot(filename, title)
 
-def plot_cycle_duration_hist(cycles_df: pd.DataFrame, title: str, filename: str):
-    if cycles_df is None or cycles_df.empty or 'duracao' not in cycles_df.columns: return
-    logger.debug(f"Gerando histograma de duração de ciclos: {title}")
-    plt.figure(figsize=(10, 6))
-    min_d, max_d = cycles_df['duracao'].min(), cycles_df['duracao'].max()
-    bins = range(min_d, max_d + 2)
-    # Histplot não usa 'palette' da mesma forma que barplot, então não precisa de 'hue' aqui
-    ax = sns.histplot(data=cycles_df, x='duracao', bins=bins, kde=False, palette="rocket", discrete=True)
-    plt.title(title, fontsize=16)
-    plt.xlabel("Duração do Ciclo (em concursos)", fontsize=12)
-    plt.ylabel("Número de Ciclos", fontsize=12)
-    plt.xticks(range(min_d, max_d + 1))
-    for p in ax.patches:
-        if p.get_height() > 0:
-            ax.annotate(f'{p.get_height():.0f}', (p.get_x() + p.get_width() / 2., p.get_height()),
-                        ha='center', va='center', size=9, xytext=(0, 5), textcoords='offset points')
-    _save_plot(filename, title)
+def plot_group_bar_chart(group_stats_df: pd.DataFrame, window: int, title: str, filename: str):
+    """
+    Plota um gráfico de barras comparando a frequência média por grupo para uma janela.
 
-def plot_delay_bar(delay_series: pd.Series, title: str, filename: str):
-    if delay_series is None or delay_series.empty: return
-    delay_series_cleaned = delay_series.dropna()
-    if delay_series_cleaned.empty: return
-    logger.debug(f"Gerando plot de barras de atraso: {title}")
-    plt.figure(figsize=(12, 6))
-    x_values = delay_series_cleaned.index.astype(int) # Usado para x e hue
-    y_values = delay_series_cleaned.values.astype(int)
-    # --- AJUSTE AQUI ---
-    # Usando hue=x_values para colorir por dezena e legend=False
-    bars = sns.barplot(x=x_values, y=y_values, hue=x_values, palette="coolwarm", legend=False)
-    # --- FIM AJUSTE ---
-    plt.title(title, fontsize=16)
-    plt.xlabel("Dezena", fontsize=12)
-    plt.ylabel("Atraso Atual (em concursos)", fontsize=12)
-    plt.xticks(ticks=range(len(x_values)), labels=x_values, rotation=0)
-    for bar in bars.patches:
-         bars.annotate(f"{bar.get_height():.0f}", (bar.get_x() + bar.get_width() / 2., bar.get_height()),
-                       ha = 'center', va = 'center', size=8, xytext = (0, 5), textcoords = 'offset points')
-    _save_plot(filename, title)
+    Args:
+        group_stats_df (pd.DataFrame): DataFrame indexado por grupo com colunas W{X}_avg_freq.
+        window (int): A janela (ex: 25, 100) a ser plotada.
+        title (str): Título do gráfico.
+        filename (str): Nome do arquivo para salvar.
+    """
+    col_name = f'W{window}_avg_freq'
+    if group_stats_df is None or group_stats_df.empty or col_name not in group_stats_df.columns:
+        logger.warning(f"Dados de stats de grupo para janela {window} inválidos ou vazios para plotar '{title}'.")
+        return
 
-# Chama setup ao importar o módulo
-setup_plotting()
+    data_to_plot = group_stats_df[col_name].sort_values(ascending=False)
+
+    plt.figure(figsize=DEFAULT_FIGSIZE)
+    bars = plt.bar(data_to_plot.index, data_to_plot.values)
+    plt.title(title, fontsize=14)
+    plt.xlabel("Grupo de Dezenas", fontsize=12)
+    plt.ylabel(f"Frequência Média (Últimos {window} Conc.)", fontsize=12)
+    plt.xticks(rotation=0, ha='center') # Garante que nomes dos grupos fiquem legíveis
+    # Adiciona valor em cima das barras
+    plt.bar_label(bars, fmt='%.2f')
+    _save_plot(filename)
