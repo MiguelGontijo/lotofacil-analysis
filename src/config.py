@@ -21,8 +21,7 @@ PLOT_DIR = PROJECT_ROOT / 'plots'
 TABLE_NAME = 'sorteios'
 CYCLES_TABLE_NAME = 'ciclos'
 FREQ_SNAP_TABLE_NAME = 'freq_geral_snap'
-# FREQ_CHUNK_DETAIL_PREFIX = 'freq_chunk_' # Prefixo para tabelas detalhadas (adiado)
-CHUNK_STATS_FINAL_PREFIX = 'chunk_stats_' # <<< Prefixo para tabelas de stats finais por chunk
+CHUNK_STATS_FINAL_PREFIX = 'chunk_stats_'
 
 # --- Configurações de Colunas (Data Loader) ---
 ORIGINAL_COLUMNS: List[str] = ['Concurso','Data Sorteio'] + [f'Bola{i}' for i in range(1, 16)]
@@ -33,6 +32,7 @@ DATE_COLUMNS: List[str] = ['data_sorteio']
 BASE_COLS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
 
 # --- Configurações de Análise (Padrões) ---
+# Janelas/Intervalos
 AGGREGATOR_WINDOWS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
 DEFAULT_CMD_WINDOWS: str = '10,25,50'
 DEFAULT_SNAPSHOT_INTERVALS: List[int] = [10, 25, 50, 100, 200, 300, 400, 500]
@@ -40,6 +40,8 @@ TREND_SHORT_WINDOW = 10; TREND_LONG_WINDOW = 50
 STANDARD_CHUNK_INTERVALS = [10, 25, 50, 100, 200, 300, 400, 500]
 FIBONACCI_CHUNK_INTERVALS = [5, 8, 13, 21, 34, 55, 89]
 ALL_CHUNK_INTERVALS = sorted(list(set(STANDARD_CHUNK_INTERVALS + FIBONACCI_CHUNK_INTERVALS)))
+# <<< CONSTANTE ADICIONADA >>>
+DEFAULT_RANK_TREND_LOOKBACK: int = 50 # Lookback padrão para tendência de rank
 
 # --- Configurações de Logging ---
 LOGGING_LEVEL = logging.INFO
