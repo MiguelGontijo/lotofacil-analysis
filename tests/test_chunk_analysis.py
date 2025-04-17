@@ -7,44 +7,70 @@ from typing import Optional
 
 # Importa a função a ser testada
 from src.analysis.chunk_analysis import get_chunk_final_stats
-# Importa DB manager para poder mockar a conexão ou usar fixture
-from src.database_manager import DATABASE_PATH # Importa o path real se precisar mockar connect
+# Importa DB manager apenas para mockar a conexão (se necessário)
+from src.database_manager import DATABASE_PATH
 from unittest.mock import patch
 
-# Usa a fixture 'populated_db_conn' definida em conftest.py
-# Mockamos DATABASE_PATH dentro da função de teste para que ela use o BD em memória
-@patch('src.analysis.chunk_analysis.DATABASE_PATH', ':memory:') # Força usar BD em memória
-@patch('src.analysis.chunk_analysis.sqlite3.connect') # Mocka a conexão
-@patch('src.analysis.chunk_analysis.read_data_from_db') # Mocka leitura da tabela principal
-def test_get_chunk_final_stats_no_chunk_data(mock_read_sorteios, mock_connect, populated_db_conn: sqlite3.Connection):
-    """
-    Testa o comportamento de get_chunk_final_stats quando a tabela de chunk está VAZIA,
-    mas a tabela de sorteios tem dados. Deve retornar um DataFrame vazio.
-    """
+# Importa dados esperados do conftest
+from .conftest import EXPECTED_CHUNK_10_STATS_CONC_10, ALL_NUMBERS
+
+
+# Usa a fixture 'populated_db_conn'
+# Remove patch de read_data_from_db, pois não é mais necessário mocká-lo aqui
+@patch('src.analysis.chunk_analysis.DATABASE_PATH', ':memory:')
+@patch('src.analysis.chunk_analysis.sqlite3.connect')
+def test_get_chunk_final_stats_with_data(mock_connect, populated_db_conn: sqlite3.Connection):
+    """ Testa se busca e retorna corretamente os dados do chunk 10 finalizado. """
     # Configura mocks
-    mock_connect.return_value = populated_db_conn # Usa a conexão da fixture (já com tabela chunk vazia)
-    # Simula a leitura do último concurso da tabela sorteios (necessário para determinar limites)
-    mock_read_sorteios.return_value = pd.DataFrame({'concurso': [6]}) # Último concurso é 6
+    mock_connect.return_value = populated_db_conn
 
     interval = 10
-    # Pede stats até o concurso 10. A função deve tentar ler a linha 10 da tabela chunk.
-    result_df = get_chunk_final_stats(interval_size=interval, concurso_maximo=10)
+    # Pede stats até o concurso 10 (deve retornar apenas a linha do concurso 10 da fixture)
+    # Passamos None para concurso_maximo para garantir que leia tudo da fixture
+    result_df = get_chunk_final_stats(interval_size=interval, concurso_maximo=None)
 
-    assert result_df is not None, "Função retornou None inesperadamente"
+    assert result_df is not None, "Função retornou None"
     assert isinstance(result_df, pd.DataFrame), "Não retornou DataFrame"
-    # Como a tabela chunk na fixture está vazia, a query não retornará linhas
-    assert result_df.empty, f"Esperado DataFrame vazio quando tabela chunk está vazia, mas obteve {len(result_df)} linhas"
+    assert not result_df.empty, "DataFrame retornado está vazio"
+    assert result_df.index.tolist() == [10], "Índice do DataFrame não é [10]"
+    assert len(result_df) == 1, "Esperado apenas 1 linha (chunk final 10)"
+
+    # Verifica frequências e ranks específicos da linha 10 com base nos dados pré-calculados
+    row_10 = result_df.loc[10]
+    assert row_10['d1_freq'] == EXPECTED_CHUNK_10_STATS_CONC_10['d1_freq'], "Freq D1"
+    assert row_10['d1_rank'] == EXPECTED_CHUNK_10_STATS_CONC_10['d1_rank'], "Rank D1"
+    assert row_10['d5_freq'] == EXPECTED_CHUNK_10_STATS_CONC_10['d5_freq'], "Freq D5"
+    assert row_10['d5_rank'] == EXPECTED_CHUNK_10_STATS_CONC_10['d5_rank'], "Rank D5"
+    assert row_10['d22_freq'] == EXPECTED_CHUNK_10_STATS_CONC_10['d22_freq'], "Freq D22"
+    assert row_10['d22_rank'] == EXPECTED_CHUNK_10_STATS_CONC_10['d22_rank'], "Rank D22"
+    assert row_10['d25_freq'] == EXPECTED_CHUNK_10_STATS_CONC_10['d25_freq'], "Freq D25"
+    assert row_10['d25_rank'] == EXPECTED_CHUNK_10_STATS_CONC_10['d25_rank'], "Rank D25"
 
 
-# Teste pulado que precisa de dados mockados na tabela chunk (implementação futura)
-@pytest.mark.skip(reason="Requer fixture com dados pré-calculados na tabela chunk_detail")
-def test_get_chunk_final_stats_with_data():
-    """
-    Testa se busca e rankeia corretamente os dados de um chunk existente.
-    (Este teste precisa que a fixture popule a tabela chunk com dados conhecidos)
-    """
-    # 1. Modificar a fixture populated_db_conn para inserir linhas conhecidas
-    #    em freq_chunk_10_detail (ex: linha para concurso 10)
-    # 2. Chamar get_chunk_final_stats(10, 10)
-    # 3. Assertar as frequências e ranks esperados para o concurso 10
-    pass
+@patch('src.analysis.chunk_analysis.DATABASE_PATH', ':memory:')
+@patch('src.analysis.chunk_analysis.sqlite3.connect')
+def test_get_chunk_final_stats_limit(mock_connect, populated_db_conn: sqlite3.Connection):
+    """ Testa se o filtro concurso_maximo funciona (não deve achar chunk 10). """
+    mock_connect.return_value = populated_db_conn
+
+    # Pede stats até o concurso 9 (não deve retornar o chunk 10)
+    result_df = get_chunk_final_stats(interval_size=10, concurso_maximo=9)
+
+    assert result_df is not None
+    assert isinstance(result_df, pd.DataFrame)
+    assert result_df.empty, "Esperado DataFrame vazio para max_concurso=9"
+
+
+@patch('src.analysis.chunk_analysis.DATABASE_PATH', ':memory:')
+@patch('src.analysis.chunk_analysis.sqlite3.connect')
+def test_get_chunk_final_stats_missing_table(mock_connect, test_db_conn: sqlite3.Connection):
+    """ Testa o comportamento se a tabela chunk não existir. """
+    mock_connect.return_value = test_db_conn # Usa DB *sem* a tabela chunk criada
+
+    # Chama a função que agora deve criar a tabela E retornar um DF vazio
+    result_df = get_chunk_final_stats(interval_size=999, concurso_maximo=10)
+
+    # *** ASSERT CORRIGIDO: Espera DataFrame vazio, não None ***
+    assert result_df is not None, "Esperado DataFrame vazio, não None"
+    assert isinstance(result_df, pd.DataFrame), "Não retornou DataFrame"
+    assert result_df.empty, "Esperado DataFrame vazio quando a tabela é criada vazia"
