@@ -64,39 +64,33 @@ class AnalysisOrchestrator:
         predict_group = parser.add_argument_group('Modo Predição'); predict_group.add_argument('--predict-last', action='store_true', help="Analisa N-1, pontua (V8) e compara com N.")
         return parser
 
-    def _ensure_data_loaded(self) -> bool:
+    def _ensure_data_loaded(self) -> bool: # (Idêntico)
         if self._last_contest_in_db is None:
              if not self._load_or_check_data(): return False
         return True
-
-    def _load_or_check_data(self) -> bool:
+    def _load_or_check_data(self) -> bool: # (Idêntico)
         if self.args.reload:
             cleaned_data = load_and_clean_data();
             if cleaned_data is None: return False
             if not save_to_db(df=cleaned_data, table_name=TABLE_NAME, if_exists='replace'): return False
-            # *** INDENTAÇÃO CORRIGIDA AQUI ***
             try:
                 with sqlite3.connect(DATABASE_PATH) as conn:
-                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_concurso ON {TABLE_NAME} (concurso);")
-                    self.logger.info(f"Índice para '{TABLE_NAME}' criado/verificado.")
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_concurso ON {TABLE_NAME} (concurso)")
+                    self.logger.info(f"Índice para '{TABLE_NAME}' ok.")
             except Exception as e:
-                self.logger.error(f"Erro ao criar índice para {TABLE_NAME}: {e}")
-            # *** FIM DA CORREÇÃO ***
+                self.logger.error(f"Erro criar índice {TABLE_NAME}: {e}")
             self._last_contest_in_db = self._get_last_available_contest(force_read=True)
             if self._last_contest_in_db is None: return False
             self.logger.info("Forçando reconstrução tabelas auxiliares após reload...")
-            update_cycles_table(force_rebuild=True)
-            update_freq_geral_snap_table(force_rebuild=True)
-            self.logger.info(f"Reconstruindo tabelas de chunk stats para: {ALL_CHUNK_INTERVALS}")
+            update_cycles_table(force_rebuild=True); update_freq_geral_snap_table(force_rebuild=True)
+            self.logger.info(f"Reconstruindo chunks para: {ALL_CHUNK_INTERVALS}")
             for interval in ALL_CHUNK_INTERVALS: update_chunk_final_stats_table(interval_size=interval, force_rebuild=True)
         else:
             if read_data_from_db(columns=['concurso'], concurso_maximo=1) is None: return False
             if self._last_contest_in_db is None: self._last_contest_in_db = self._get_last_available_contest()
             if self._last_contest_in_db is None: return False
         self.logger.info("Dados do BD acessíveis."); return True
-
-    def _get_last_available_contest(self, force_read: bool = False) -> Optional[int]:
-        # (Idêntico)
+    def _get_last_available_contest(self, force_read: bool = False) -> Optional[int]: # (Idêntico)
         if not force_read and hasattr(self, '_last_contest_in_db') and self._last_contest_in_db is not None: return self._last_contest_in_db
         df = read_data_from_db(columns=['concurso']);
         if df is not None and not df.empty: max_c = df['concurso'].max(); self._last_contest_in_db = int(max_c) if not pd.isna(max_c) else None; return self._last_contest_in_db
@@ -104,25 +98,30 @@ class AnalysisOrchestrator:
 
     # --- MÉTODO _run_analysis_mode ATUALIZADO ---
     def _run_analysis_mode(self):
-        """ Executa o pipeline no modo Análise, incluindo visualização de métricas. """
+        """ Executa o pipeline no modo Análise. """
         self.logger.info("Executando em modo Análise...")
         analyses_to_run = self.args.analysis if self.args.analysis is not None else ['all']
         run_all = 'all' in analyses_to_run
 
+        # Determina quais análises executar
         default_analyses = ['freq','pair','comb','cycle','cycle-stats','delay','max-delay','props']
         run_list = default_analyses if run_all else [a for a in analyses_to_run if a in default_analyses]
         run_metrics_viz = run_all or 'metrics-viz' in analyses_to_run
 
-        # Executa análises padrão se solicitadas
+        # *** LÓGICA AJUSTADA PARA GARANTIR DADOS PARA VISUALIZAÇÃO ***
+        analysis_results_for_viz = None # Armazena resultados se viz for necessária
+        cycles_summary_for_viz = None # Armazena ciclos se viz for necessária
+
+        # Executa análises padrão PRIMEIRO se solicitadas
         if run_list:
              self.logger.info(f"Executando análises padrão: {run_list}")
              if 'freq' in run_list: execute_frequency_analysis(self.args, self.should_plot)
              if 'pair' in run_list: execute_pair_analysis(self.args)
              if 'comb' in run_list: execute_combination_analysis(self.args)
-             cycles_summary = None
-             if 'cycle' in run_list or 'cycle-stats' in run_list: cycles_summary = execute_cycle_identification(self.args)
-             if 'cycle' in run_list and cycles_summary is not None: display_cycle_summary(cycles_summary, self.args, self.should_plot)
-             if 'cycle-stats' in run_list and cycles_summary is not None: execute_cycle_stats_analysis(cycles_summary, self.args)
+             if 'cycle' in run_list or 'cycle-stats' in run_list: # Identifica ciclos se necessário
+                  cycles_summary_for_viz = execute_cycle_identification(self.args) # Guarda para usar depois
+             if 'cycle' in run_list and cycles_summary_for_viz is not None: display_cycle_summary(cycles_summary_for_viz, self.args, self.should_plot)
+             if 'cycle-stats' in run_list and cycles_summary_for_viz is not None: execute_cycle_stats_analysis(cycles_summary_for_viz, self.args)
              if 'delay' in run_list: execute_delay_analysis(self.args, self.should_plot)
              if 'max-delay' in run_list: execute_max_delay_analysis(self.args, self.should_plot)
              if 'props' in run_list: execute_properties_analysis(self.args, self.should_plot)
@@ -174,49 +173,43 @@ class AnalysisOrchestrator:
     def run(self):
         """ Método principal: Atualiza tabelas OU executa modo principal """
         self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v8")
-
-        # Ação 1: Atualizar/Reconstruir Tabelas Auxiliares
         run_update_action = False
-        # Usa getattr para checar atributos opcionais com segurança
         if getattr(self.args, 'update_cycles', False) or getattr(self.args, 'force_rebuild_cycles', False):
             if not self._ensure_data_loaded(): return
-            self.logger.info("Executando atualização/rebuild da tabela de ciclos...")
             update_cycles_table(force_rebuild=getattr(self.args, 'force_rebuild_cycles', False))
             run_update_action = True
         if getattr(self.args, 'update_freq_snaps', False) or getattr(self.args, 'force_rebuild_freq_snaps', False):
              if not self._ensure_data_loaded(): return
-             self.logger.info("Executando atualização/rebuild dos snapshots de frequência...")
              update_freq_geral_snap_table(force_rebuild=getattr(self.args, 'force_rebuild_freq_snaps', False))
              run_update_action = True
-        if getattr(self.args, 'rebuild_chunk_stats', None): # Verifica se o argumento existe e tem valor
+        if getattr(self.args, 'rebuild_chunk_stats', None):
              if not self._ensure_data_loaded(): return
-             intervals_to_process = [];
-             if 'all' in self.args.rebuild_chunk_stats: intervals_to_process = ALL_CHUNK_INTERVALS
+             intervals_to_process: List[Union[int, str]] = self.args.rebuild_chunk_stats; final_intervals: List[int] = [];
+             if 'all' in intervals_to_process: final_intervals = ALL_CHUNK_INTERVALS
              else:
-                 try: intervals_to_process = [int(i) for i in self.args.rebuild_chunk_stats]
-                 except ValueError: self.logger.error(f"Intervalos inválidos: {self.args.rebuild_chunk_stats}"); return
-             self.logger.info(f"Executando rebuild para chunk stats finais: {intervals_to_process}")
-             for interval in intervals_to_process: update_chunk_final_stats_table(interval_size=interval, force_rebuild=True)
-             run_update_action = True
-        elif getattr(self.args, 'update_chunk_stats', None): # Lógica de update incremental
-             if not self._ensure_data_loaded(): return
-             intervals_to_process = [];
-             if 'all' in self.args.update_chunk_stats: intervals_to_process = ALL_CHUNK_INTERVALS
-             else:
-                 try: intervals_to_process = [int(i) for i in self.args.update_chunk_stats]
+                 try: final_intervals = [int(i) for i in intervals_to_process]
                  except ValueError: self.logger.error(f"Intervalos inválidos: {intervals_to_process}"); return
-             self.logger.info(f"Executando update para chunk stats finais: {intervals_to_process}")
+             self.logger.info(f"Executando rebuild chunk stats: {final_intervals}")
+             for interval in final_intervals: update_chunk_final_stats_table(interval_size=interval, force_rebuild=True)
+             run_update_action = True
+        elif getattr(self.args, 'update_chunk_stats', None):
+             if not self._ensure_data_loaded(): return
+             intervals_to_process = self.args.update_chunk_stats; final_intervals = []
+             if 'all' in intervals_to_process: final_intervals = ALL_CHUNK_INTERVALS
+             else:
+                 try: final_intervals = [int(i) for i in intervals_to_process]
+                 except ValueError: self.logger.error(f"Intervalos inválidos: {intervals_to_process}"); return
+             self.logger.info(f"Executando update chunk stats: {final_intervals}")
              for interval in final_intervals: update_chunk_final_stats_table(interval_size=interval, force_rebuild=False)
              run_update_action = True
 
-        if run_update_action: self.logger.info("Ação de update concluída. Encerrando."); return
+        if run_update_action: self.logger.info("Ação de update concluída."); return
 
-        # Ação 2: Executar Modos Principais
-        if not self._ensure_data_loaded(): self.logger.error("Pré-requisitos não atendidos."); return
+        if not self._ensure_data_loaded(): return
 
         if self.args.backtest: self._run_backtest_mode()
         elif self.args.predict_last: self._run_predict_last_mode()
         elif self.args.analysis is not None: self._run_analysis_mode() # Chama o método atualizado
-        else: self.logger.info("Nenhuma ação principal. Use --analysis, --backtest, --predict-last ou --update-*.");
+        else: self.logger.info("Nenhuma ação principal. Use --analysis, --backtest, etc.");
 
         self.logger.info("Aplicação Lotofacil Analysis finalizada.")
