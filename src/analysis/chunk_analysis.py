@@ -18,7 +18,7 @@ def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = N
     """ Lê as estatísticas finais salvas para cada bloco completo. """
     table_name = get_chunk_final_stats_table_name(interval_size)
     logger.info(f"Buscando stats finais chunks de {interval_size} em '{table_name}'...")
-    # create_chunk_stats_final_table(interval_size) # Não cria aqui, assume existente
+    # create_chunk_stats_final_table(interval_size) # Não cria aqui, assume que updater criou
 
     db_path = DATABASE_PATH
     freq_cols = [f'd{i}_freq' for i in ALL_NUMBERS]
@@ -34,27 +34,21 @@ def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = N
 
             sql_query = f"SELECT {all_cols_str} FROM {table_name}"; params = []
             if concurso_maximo is not None:
-                # Calcula o último concurso final de chunk <= concurso_maximo
                 last_relevant_chunk_end = (concurso_maximo // interval_size) * interval_size
-                if last_relevant_chunk_end > 0:
-                     sql_query += " WHERE concurso_fim <= ?"
-                     params.append(last_relevant_chunk_end)
-                else:
-                     return pd.DataFrame(columns=all_cols).set_index('concurso_fim') # Retorna vazio se nenhum chunk completo
+                if last_relevant_chunk_end > 0: sql_query += " WHERE concurso_fim <= ?"; params.append(last_relevant_chunk_end)
+                else: return pd.DataFrame(columns=all_cols).set_index('concurso_fim')
 
             sql_query += " ORDER BY concurso_fim ASC;"
             df_stats = pd.read_sql_query(sql_query, conn, params=params)
             logger.info(f"{len(df_stats)} registros de stats finais de chunk lidos.")
 
-            if df_stats.empty: return pd.DataFrame(columns=all_cols).set_index('concurso_fim')
+            if df_stats.empty: return pd.DataFrame(columns=all_cols[1:], index=pd.Index([], name='concurso_fim')) # Retorna DF vazio com colunas
 
             df_stats.set_index('concurso_fim', inplace=True)
-            for col in df_stats.columns: # Garante tipos int
-                df_stats[col] = pd.to_numeric(df_stats[col], errors='coerce').fillna(0).astype(int)
+            for col in df_stats.columns: df_stats[col] = pd.to_numeric(df_stats[col], errors='coerce').fillna(0).astype(int)
             return df_stats
 
-    except sqlite3.Error as e: logger.error(f"Erro SQLite ao ler '{table_name}': {e}"); return None
-    except Exception as e: logger.error(f"Erro inesperado em get_chunk_final_stats: {e}"); return None
+    except Exception as e: logger.error(f"Erro ao ler stats finais chunk '{table_name}': {e}"); return None
 
 
 # --- FUNÇÃO IMPLEMENTADA ---
@@ -68,50 +62,40 @@ def calculate_historical_rank_stats(interval_size: int, concurso_maximo: Optiona
     # 1. Obtém os ranks finais de cada chunk completo
     df_chunk_stats = get_chunk_final_stats(interval_size, concurso_maximo)
 
-    if df_chunk_stats is None: return None # Erro ao ler
+    # Prepara um DataFrame de resultado padrão com NaNs
+    nan_series = pd.Series(np.nan, index=ALL_NUMBERS)
+    default_result_df = pd.DataFrame({
+        f'avg_rank_chunk{interval_size}': nan_series,
+        f'std_rank_chunk{interval_size}': nan_series
+    }, index=pd.Index(ALL_NUMBERS, name='dezena'))
+
+    if df_chunk_stats is None: return None # Erro na leitura
     if df_chunk_stats.empty:
         logger.warning(f"Nenhum chunk stat encontrado para intervalo {interval_size}. Retornando NaNs.")
-        nan_series = pd.Series(np.nan, index=ALL_NUMBERS)
-        return pd.DataFrame({ f'avg_rank_chunk{interval_size}': nan_series, f'std_rank_chunk{interval_size}': nan_series }, index=pd.Index(ALL_NUMBERS, name='dezena'))
-    if len(df_chunk_stats) < 2:
-        logger.warning(f"Apenas {len(df_chunk_stats)} chunk(s) encontrados. Std Dev será NaN.")
-        # Calcula a média mesmo com 1 chunk
-        rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS if f'd{i}_rank' in df_chunk_stats.columns]
-        if not rank_cols: return None # Se não houver colunas de rank
-        df_ranks_only = df_chunk_stats[rank_cols]
-        avg_ranks = df_ranks_only.mean(axis=0, skipna=True)
-        # Cria DataFrame de resultado com std dev como NaN
-        stats_data = []
-        for i in ALL_NUMBERS:
-            col_rank = f'd{i}_rank'
-            stats_data.append({ 'dezena': i, f'avg_rank_chunk{interval_size}': avg_ranks.get(col_rank, np.nan), f'std_rank_chunk{interval_size}': np.nan })
-        return pd.DataFrame(stats_data).set_index('dezena')
-
+        return default_result_df
 
     # 2. Seleciona apenas as colunas de rank
     rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS if f'd{i}_rank' in df_chunk_stats.columns]
-    if not rank_cols: logger.error(f"Colunas de rank não encontradas p/ intervalo {interval_size}."); return None
+    if not rank_cols or len(rank_cols) != 25:
+        logger.error(f"Colunas de rank insuficientes/inválidas para intervalo {interval_size}."); return None
     df_ranks_only = df_chunk_stats[rank_cols]
 
     # 3. Calcula Média e Desvio Padrão
-    avg_ranks = df_ranks_only.mean(axis=0, skipna=True)
-    std_ranks = df_ranks_only.std(axis=0, skipna=True, ddof=1)
+    avg_ranks = df_ranks_only.mean(axis=0, skipna=True) # Média dos ranks para cada coluna dX_rank
+    std_ranks = pd.Series(np.nan, index=rank_cols) # Inicializa com NaN
+    if len(df_ranks_only) >= 2: # Só calcula std dev se tiver pelo menos 2 chunks
+         std_ranks = df_ranks_only.std(axis=0, skipna=True, ddof=1)
 
     # 4. Formata o resultado
     stats_data = []
     for i in ALL_NUMBERS:
-        col_rank = f'd{i}_rank'
+        col_rank_key = f'd{i}_rank'
         stats_data.append({
             'dezena': i,
-            f'avg_rank_chunk{interval_size}': avg_ranks.get(col_rank, np.nan),
-            f'std_rank_chunk{interval_size}': std_ranks.get(col_rank, np.nan) # Pode ser NaN se houver apenas 1 valor não-nulo
+            f'avg_rank_chunk{interval_size}': avg_ranks.get(col_rank_key, np.nan),
+            f'std_rank_chunk{interval_size}': std_ranks.get(col_rank_key, np.nan)
         })
 
     results_df = pd.DataFrame(stats_data).set_index('dezena')
-    # Preenche NaNs restantes (ex: se std não pôde ser calculado) com um valor padrão?
-    # Média NaN pode significar que a dezena nunca teve rank (sempre freq 0?). Usar rank 26?
-    # Std NaN significa poucos dados. Usar 0? Ou um valor alto indicando incerteza? Usar NaN.
-    # results_df.fillna({'avg_rank_chunk...': 26, 'std_rank_chunk...': 0}, inplace=True) # Opcional
-
     logger.info(f"Stats históricos de rank para chunks de {interval_size} calculados.")
     return results_df
