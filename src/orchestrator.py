@@ -39,9 +39,15 @@ from src.table_updater import update_freq_geral_snap_table, update_chunk_final_s
 
 # Verifica plotagem
 try:
-    from src.visualization.plotter import setup_plotting, plot_backtest_summary
+    from src.visualization.plotter import setup_plotting
+    # Não tenta importar plot_backtest_summary aqui para evitar erro inicial
     setup_plotting(); PLOTTING_ENABLED = True
-except ImportError as e: logger.warning(f"Libs plot não encontradas: {e}."); PLOTTING_ENABLED = False
+except ImportError as e: logger.warning(f"Libs plot não encontradas: {e}. Plotagem desativada."); PLOTTING_ENABLED = False
+# Importa a função específica onde ela é usada, tratando o erro lá se necessário
+# Tenta importar plot_backtest_summary (se existir)
+try: from src.visualization.plotter import plot_backtest_summary
+except ImportError: plot_backtest_summary = None
+
 
 StrategyFuncType = Callable[[Dict[str, Any]], Optional[Set[int]]]
 
@@ -50,9 +56,11 @@ class AnalysisOrchestrator:
         self.logger = logger
         self.args = self._setup_parser().parse_args()
         self.plotting_available = PLOTTING_ENABLED
-        self.should_plot = (self.args.plot or (self.args.analysis and 'metrics-viz' in self.args.analysis)) and self.plotting_available
-        if (self.args.plot or (self.args.analysis and 'metrics-viz' in self.args.analysis)) and not self.plotting_available:
-             self.logger.warning("Plot/Viz solicitado, mas matplotlib não encontrado.")
+        # Define analysis_args ANTES de usá-lo
+        self.analysis_args = self.args.analysis if hasattr(self.args, 'analysis') and self.args.analysis is not None else []
+        self.should_plot = (self.args.plot or ('metrics-viz' in self.analysis_args)) and self.plotting_available
+        if (self.args.plot or ('metrics-viz' in self.analysis_args)) and not self.plotting_available:
+             self.logger.warning("Plot/Viz solicitado, mas matplotlib não disponível.")
         self._last_contest_in_db = None
 
     def _setup_parser(self) -> argparse.ArgumentParser:
@@ -68,18 +76,18 @@ class AnalysisOrchestrator:
         if self._last_contest_in_db is None:
              if not self._load_or_check_data(): return False
         return True
-    def _load_or_check_data(self) -> bool: # (Idêntico)
+    def _load_or_check_data(self) -> bool: # (Idêntico - com try/except corrigido)
         if self.args.reload:
             cleaned_data = load_and_clean_data();
             if cleaned_data is None: return False
             if not save_to_db(df=cleaned_data, table_name=TABLE_NAME, if_exists='replace'): return False
-            try:
+            try: # Bloco Corrigido
                 with sqlite3.connect(DATABASE_PATH) as conn:
-                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_concurso ON {TABLE_NAME} (concurso)")
-                    self.logger.info(f"Índice para '{TABLE_NAME}' ok.")
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_concurso ON {TABLE_NAME} (concurso);")
+                    self.logger.info(f"Índice para '{TABLE_NAME}' criado/verificado.")
             except Exception as e:
-                self.logger.error(f"Erro criar índice {TABLE_NAME}: {e}")
-            self._last_contest_in_db = self._get_last_available_contest(force_read=True)
+                self.logger.error(f"Erro ao criar índice para {TABLE_NAME}: {e}")
+            self._last_contest_in_db = self._get_last_available_contest(force_read=True);
             if self._last_contest_in_db is None: return False
             self.logger.info("Forçando reconstrução tabelas auxiliares após reload...")
             update_cycles_table(force_rebuild=True); update_freq_geral_snap_table(force_rebuild=True)
@@ -96,35 +104,56 @@ class AnalysisOrchestrator:
         if df is not None and not df.empty: max_c = df['concurso'].max(); self._last_contest_in_db = int(max_c) if not pd.isna(max_c) else None; return self._last_contest_in_db
         self.logger.error("Não ler dados BD."); return None
 
-    # --- MÉTODO _run_analysis_mode ATUALIZADO ---
+    # --- MÉTODO _run_analysis_mode (LÓGICA CORRIGIDA FINALMENTE) ---
     def _run_analysis_mode(self):
-        """ Executa o pipeline no modo Análise. """
+        """ Executa o pipeline no modo Análise, incluindo visualização. """
         self.logger.info("Executando em modo Análise...")
-        analyses_to_run = self.args.analysis if self.args.analysis is not None else ['all']
+        # Usa self.analysis_args definido no __init__
+        analyses_to_run = self.analysis_args if self.analysis_args else ['all']
         run_all = 'all' in analyses_to_run
 
-        # Determina quais análises executar
         default_analyses = ['freq','pair','comb','cycle','cycle-stats','delay','max-delay','props']
         run_list = default_analyses if run_all else [a for a in analyses_to_run if a in default_analyses]
         run_metrics_viz = run_all or 'metrics-viz' in analyses_to_run
 
-        # *** LÓGICA AJUSTADA PARA GARANTIR DADOS PARA VISUALIZAÇÃO ***
-        analysis_results_for_viz = None # Armazena resultados se viz for necessária
-        cycles_summary_for_viz = None # Armazena ciclos se viz for necessária
+        # Variáveis para guardar resultados se precisarmos para múltiplos steps
+        analysis_results = None
+        cycles_summary = None
 
-        # Executa análises padrão PRIMEIRO se solicitadas
+        # Executa análises padrão se solicitadas
         if run_list:
              self.logger.info(f"Executando análises padrão: {run_list}")
              if 'freq' in run_list: execute_frequency_analysis(self.args, self.should_plot)
              if 'pair' in run_list: execute_pair_analysis(self.args)
              if 'comb' in run_list: execute_combination_analysis(self.args)
-             if 'cycle' in run_list or 'cycle-stats' in run_list: # Identifica ciclos se necessário
-                  cycles_summary_for_viz = execute_cycle_identification(self.args) # Guarda para usar depois
-             if 'cycle' in run_list and cycles_summary_for_viz is not None: display_cycle_summary(cycles_summary_for_viz, self.args, self.should_plot)
-             if 'cycle-stats' in run_list and cycles_summary_for_viz is not None: execute_cycle_stats_analysis(cycles_summary_for_viz, self.args)
+             # Identifica ciclos se 'cycle' ou 'cycle-stats' estiverem na lista
+             if 'cycle' in run_list or 'cycle-stats' in run_list:
+                  if cycles_summary is None: cycles_summary = execute_cycle_identification(self.args)
+             if 'cycle' in run_list and cycles_summary is not None: display_cycle_summary(cycles_summary, self.args, self.should_plot)
+             if 'cycle-stats' in run_list and cycles_summary is not None: execute_cycle_stats_analysis(cycles_summary, self.args)
              if 'delay' in run_list: execute_delay_analysis(self.args, self.should_plot)
              if 'max-delay' in run_list: execute_max_delay_analysis(self.args, self.should_plot)
              if 'props' in run_list: execute_properties_analysis(self.args, self.should_plot)
+
+        # Executa visualização de métricas se solicitado
+        if run_metrics_viz:
+             if not self.plotting_available:
+                  self.logger.warning("Análise 'metrics-viz' solicitada, mas matplotlib não disponível.")
+             else:
+                  self.logger.info("Preparando dados para visualização de métricas...")
+                  # Garante que temos o último concurso (já deve ter sido pego por _ensure_data_loaded)
+                  max_c = self.args.max_concurso if self.args.max_concurso else self._last_contest_in_db
+                  if max_c is None:
+                       self.logger.error("Não foi possível determinar o último concurso para visualização (self._last_contest_in_db is None).")
+                  else:
+                       # *** CHAMA O AGREGADOR PARA OBTER OS DADOS NECESSÁRIOS ***
+                       self.logger.info(f"Calculando dados agregados até {max_c} para visualização...")
+                       analysis_results = get_consolidated_analysis(max_c)
+
+                       if analysis_results: # Verifica se o agregador retornou dados
+                            execute_metrics_visualization(analysis_results) # Passa os dados para o step de plotagem
+                       else:
+                            self.logger.error("Falha ao obter dados consolidados para visualização.")
 
     def _run_backtest_mode(self):
         # (Código idêntico ao anterior)
@@ -168,23 +197,17 @@ class AnalysisOrchestrator:
         print(f"\n--- Resultado Real do Concurso {n} ---"); print(sorted(list(actual_numbers)))
         if selected_numbers is not None: from src.backtester.evaluator import evaluate_hits; hits = evaluate_hits(selected_numbers, actual_numbers); print(f"\n--- Comparação ---\nAcertos: {hits} pontos")
         else: print("\n--- Comparação ---\nSeleção não gerada.")
-
-    # --- MÉTODO run() ATUALIZADO ---
-    def run(self):
-        """ Método principal: Atualiza tabelas OU executa modo principal """
+        
+    def run(self): # (Idêntico)
         self.logger.info(f"Iniciando Lotofacil Analysis - Orquestrador v8")
         run_update_action = False
+        # ... (Lógica de update/rebuild idêntica e correta) ...
         if getattr(self.args, 'update_cycles', False) or getattr(self.args, 'force_rebuild_cycles', False):
-            if not self._ensure_data_loaded(): return
-            update_cycles_table(force_rebuild=getattr(self.args, 'force_rebuild_cycles', False))
-            run_update_action = True
+            if not self._ensure_data_loaded(): return; update_cycles_table(force_rebuild=getattr(self.args, 'force_rebuild_cycles', False)); run_update_action = True
         if getattr(self.args, 'update_freq_snaps', False) or getattr(self.args, 'force_rebuild_freq_snaps', False):
-             if not self._ensure_data_loaded(): return
-             update_freq_geral_snap_table(force_rebuild=getattr(self.args, 'force_rebuild_freq_snaps', False))
-             run_update_action = True
+             if not self._ensure_data_loaded(): return; update_freq_geral_snap_table(force_rebuild=getattr(self.args, 'force_rebuild_freq_snaps', False)); run_update_action = True
         if getattr(self.args, 'rebuild_chunk_stats', None):
-             if not self._ensure_data_loaded(): return
-             intervals_to_process: List[Union[int, str]] = self.args.rebuild_chunk_stats; final_intervals: List[int] = [];
+             if not self._ensure_data_loaded(): return; intervals_to_process: List[Union[int, str]] = self.args.rebuild_chunk_stats; final_intervals: List[int] = [];
              if 'all' in intervals_to_process: final_intervals = ALL_CHUNK_INTERVALS
              else:
                  try: final_intervals = [int(i) for i in intervals_to_process]
@@ -193,8 +216,7 @@ class AnalysisOrchestrator:
              for interval in final_intervals: update_chunk_final_stats_table(interval_size=interval, force_rebuild=True)
              run_update_action = True
         elif getattr(self.args, 'update_chunk_stats', None):
-             if not self._ensure_data_loaded(): return
-             intervals_to_process = self.args.update_chunk_stats; final_intervals = []
+             if not self._ensure_data_loaded(): return; intervals_to_process = self.args.update_chunk_stats; final_intervals = []
              if 'all' in intervals_to_process: final_intervals = ALL_CHUNK_INTERVALS
              else:
                  try: final_intervals = [int(i) for i in intervals_to_process]
@@ -204,12 +226,12 @@ class AnalysisOrchestrator:
              run_update_action = True
 
         if run_update_action: self.logger.info("Ação de update concluída."); return
-
-        if not self._ensure_data_loaded(): return
+        # Garante que dados são carregados ANTES de rodar os modos principais
+        if not self._ensure_data_loaded(): self.logger.error("Pré-requisitos de dados não atendidos."); return
 
         if self.args.backtest: self._run_backtest_mode()
         elif self.args.predict_last: self._run_predict_last_mode()
-        elif self.args.analysis is not None: self._run_analysis_mode() # Chama o método atualizado
-        else: self.logger.info("Nenhuma ação principal. Use --analysis, --backtest, etc.");
+        elif self.args.analysis is not None: self._run_analysis_mode() # Chama método corrigido
+        else: self.logger.info("Nenhuma ação principal.");
 
         self.logger.info("Aplicação Lotofacil Analysis finalizada.")
