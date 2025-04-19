@@ -42,15 +42,16 @@ def mock_analysis_results():
     # Grupo Stats
     for w in DEFAULT_GROUP_WINDOWS: results[f'group_W{w}_avg_freq'] = pd.Series(5.0, index=idx)
     # Repetição
-    results['numbers_in_last_draw'] = {1, 3, 5}
-    results['repetition_rate'] = pd.Series(np.linspace(0.1, 0.9, 25), index=idx) # Taxa crescente
+    results['numbers_in_last_draw'] = {1, 3, 5} # Penaliza 1, 3, 5
+    results['repetition_rate'] = pd.Series(np.linspace(0.1, 0.9, 25), index=idx)
 
     # Adiciona NaNs
     results['last_cycle_freq'].loc[10] = pd.NA
     results['delay_std_dev'].loc[15] = pd.NA
-    results['avg_hist_intra_delay'].loc[20] = pd.NA
+    #results['avg_hist_intra_delay'].loc[20] = pd.NA # Não usado na V8 atual
     results['closing_freq'].loc[2] = pd.NA
-    results['rank_trend'].loc[4] = pd.NA # NaN em rank trend
+    results['rank_trend'].loc[4] = pd.NA
+    results['group_W25_avg_freq'].loc[6] = pd.NA # Adiciona NaN em stat de grupo
 
     return results
 
@@ -71,7 +72,6 @@ def test_calculate_scores_ranking_extremos(mock_analysis_results):
     # Verifica apenas se calcula e se os extremos não são NaN
     assert pd.notna(scores.idxmax()) and scores.idxmax() in ALL_NUMBERS_TEST
     assert pd.notna(scores.idxmin()) and scores.idxmin() in ALL_NUMBERS_TEST
-    # A ordem exata com V8 é muito complexa para validar manualmente aqui
     print("\nScores (Teste Extremos V8):"); print(scores.head(3)); print(scores.tail(3))
 
 def test_calculate_scores_cycle_bonus(mock_analysis_results):
