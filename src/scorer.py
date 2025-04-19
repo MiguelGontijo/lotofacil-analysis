@@ -10,52 +10,59 @@ from src.config import logger, ALL_NUMBERS, AGGREGATOR_WINDOWS, DEFAULT_GROUP_WI
 # Fallbacks
 if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
 if 'AGGREGATOR_WINDOWS' not in globals(): AGGREGATOR_WINDOWS = [10, 25, 50, 100, 200, 300, 400, 500]
-if 'DEFAULT_GROUP_WINDOWS' not in globals(): DEFAULT_GROUP_WINDOWS = [25, 100]
+if 'DEFAULT_GROUP_WINDOWS' not in globals(): DEFAULT_GROUP_WINDOWS = [25, 100] # Usa apenas W25 agora
 
 
-# --- CONFIGURAÇÃO DE SCORE V8 ---
-DEFAULT_SCORING_CONFIG_V8: Dict[str, Dict] = {
-    # Frequências
-    'overall_freq':      {'weight': 0.4, 'rank_higher_is_better': True},
-    **{f'recent_freq_{w}': {'weight': max(0.1, 1.5 - (w/100)*0.4), 'rank_higher_is_better': True} for w in AGGREGATOR_WINDOWS if w >= 100},
-    'recent_freq_50':    {'weight': 1.0, 'rank_higher_is_better': True},
-    'recent_freq_25':    {'weight': 1.2, 'rank_higher_is_better': True},
-    'recent_freq_10':    {'weight': 1.4, 'rank_higher_is_better': True},
+# --- CONFIGURAÇÃO DE SCORE V7 - Refinada ---
+DEFAULT_SCORING_CONFIG_V7: Dict[str, Dict] = {
+    # Metrica: {peso: float, rank_higher_is_better: bool}
+    'overall_freq':      {'weight': 0.3, 'rank_higher_is_better': True}, # Reduzido
+    # Frequências Recentes - Mantendo ênfase nas curtas
+    **{f'recent_freq_{w}': {'weight': max(0.1, 1.0 - (w/100)*0.3), 'rank_higher_is_better': True} for w in AGGREGATOR_WINDOWS if w >= 100}, # Pesos 0.7 a 0.1
+    'recent_freq_50':    {'weight': 1.0, 'rank_higher_is_better': True}, # Base
+    'recent_freq_25':    {'weight': 1.3, 'rank_higher_is_better': True}, # Importante
+    'recent_freq_10':    {'weight': 1.5, 'rank_higher_is_better': True}, # Mais importante
     # Tendências
     'freq_trend':        {'weight': 0.8, 'rank_higher_is_better': True},
-    'rank_trend':        {'weight': 1.2, 'rank_higher_is_better': True},
+    'rank_trend':        {'weight': 1.2, 'rank_higher_is_better': True}, # Valorizado
     # Atrasos
-    'current_delay':     {'weight': 1.5, 'rank_higher_is_better': True},
-    'delay_std_dev':     {'weight': 0.7, 'rank_higher_is_better': False},
+    'current_delay':     {'weight': 1.6, 'rank_higher_is_better': True}, # Muito importante
+    'delay_std_dev':     {'weight': 0.3, 'rank_higher_is_better': False},# Peso bem reduzido (pouca variância)
     # Ciclos
-    'last_cycle_freq':   {'weight': 0.5, 'rank_higher_is_better': True}, # Peso menor
-    'current_cycle_freq':{'weight': 0.8, 'rank_higher_is_better': True},
-    'current_intra_cycle_delay': {'weight': 1.3, 'rank_higher_is_better': True},
-    'closing_freq':      {'weight': 0.6, 'rank_higher_is_better': True}, # Peso ajustado
-    'sole_closing_freq': {'weight': 0.2, 'rank_higher_is_better': True}, # Peso ajustado
-    # Grupos (Usa janelas padrão)
-    **{f'group_W{w}_avg_freq': {'weight': 0.4, 'rank_higher_is_better': True} for w in DEFAULT_GROUP_WINDOWS},
+    'last_cycle_freq':   {'weight': 0.4, 'rank_higher_is_better': True}, # Menos peso
+    'current_cycle_freq':{'weight': 1.0, 'rank_higher_is_better': True},
+    'current_intra_cycle_delay': {'weight': 1.4, 'rank_higher_is_better': True}, # Importante
+    'closing_freq':      {'weight': 0.9, 'rank_higher_is_better': True}, # Mais peso (alta variância)
+    'sole_closing_freq': {'weight': 0.4, 'rank_higher_is_better': True}, # Mais peso
+    # Grupos (Usando SÓ a janela W25, que mostrou mais dinâmica)
+    'group_W25_avg_freq':{'weight': 0.5, 'rank_higher_is_better': True}, # Peso moderado
     # Repetição (Taxa histórica)
-    'repetition_rate':   {'weight': -0.6, 'rank_higher_is_better': True}, # Taxa alta = Pior (Peso negativo)
+    'repetition_rate':   {'weight': -0.7, 'rank_higher_is_better': True}, # Taxa alta = Ruim (peso negativo maior)
+
+    # --- Métricas com peso 0 (não usadas no score V7 refinado) ---
+    **{f'group_W{w}_avg_freq': {'weight': 0.0, 'rank_higher_is_better': True} for w in DEFAULT_GROUP_WINDOWS if w != 25}, # Zera outras janelas de grupo
+    # 'avg_hist_intra_delay': {'weight': 0.0, 'rank_higher_is_better': False},
+    # 'max_hist_intra_delay': {'weight': 0.0, 'rank_higher_is_better': True},
+    # 'delay_mean': {'weight': 0.0, 'rank_higher_is_better': True},
+    # 'max_delay': {'weight': 0.0, 'rank_higher_is_better': False},
 }
 
 MISSING_CYCLE_BONUS = 5.0
-REPEAT_PENALTY = -15.0 # Penalidade por estar no último sorteio
+REPEAT_PENALTY = -15.0 # Penalidade fixa (poderia ser dinâmica?)
 
 def calculate_scores(analysis_results: Dict[str, Any],
                      config: Optional[Dict[str, Dict]] = None) -> Optional[pd.Series]:
-    """ Calcula pontuação V8. """
-    # <<< USA V8 COMO PADRÃO >>>
-    if config is None: config = DEFAULT_SCORING_CONFIG_V8
+    """ Calcula pontuação V7 (Refinada). """
+    if config is None: config = DEFAULT_SCORING_CONFIG_V7 # <<< USA V7 Refinada
     if not analysis_results: logger.error("Resultados da análise vazios."); return None
 
-    logger.info("Calculando pontuação das dezenas (v8)...")
+    logger.info("Calculando pontuação das dezenas (v7 Refinada)...")
     final_scores = pd.Series(0.0, index=ALL_NUMBERS); final_scores.index.name = 'Dezena'
 
-    # Calcula scores baseados nas métricas rankeáveis
+    # Calcula scores baseados nas métricas e pesos
     for metric, params in config.items():
         weight = params.get('weight', 1.0); higher_is_better = params.get('rank_higher_is_better', True)
-        if weight == 0: continue
+        if weight == 0: continue # Pula métricas com peso zero
         if metric not in analysis_results or analysis_results[metric] is None: logger.warning(f"Métrica '{metric}' Nula/Ausente."); continue
 
         metric_series = analysis_results[metric]; logger.debug(f"Proc: {metric} (W:{weight}, HighBest:{higher_is_better})")
@@ -88,5 +95,5 @@ def calculate_scores(analysis_results: Dict[str, Any],
 
     final_scores.sort_values(ascending=False, inplace=True)
     final_scores.fillna(0, inplace=True)
-    logger.info("Cálculo de pontuação final (v8) concluído.")
+    logger.info("Cálculo de pontuação final (v7 Refinada) concluído.")
     return final_scores
