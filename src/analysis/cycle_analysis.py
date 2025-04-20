@@ -36,7 +36,7 @@ def _find_new_cycles_in_data(df_new_data: pd.DataFrame, start_contest_for_search
         if current_cycle_numbers == ALL_NUMBERS_SET:
             cycle_count += 1; cycle_end_concurso: int = current_concurso; duration: int = cycle_end_concurso - cycle_start_concurso + 1
             new_cycles_found.append({'numero_ciclo': cycle_count, 'concurso_inicio': cycle_start_concurso, 'concurso_fim': cycle_end_concurso, 'duracao': duration})
-            logger.debug(f"Novo ciclo completo: {cycle_count} (Fim: {cycle_end_concurso})")
+            # logger.debug(f"Novo ciclo completo: {cycle_count} (Fim: {cycle_end_concurso})")
             cycle_start_concurso = cycle_end_concurso + 1; current_cycle_numbers = set()
     logger.info(f"{len(new_cycles_found)} novos ciclos completos encontrados.")
     return new_cycles_found
@@ -96,7 +96,6 @@ def update_cycles_table(force_rebuild: bool = False):
 
 # --- FUNÇÃO PARA LER CICLOS DA TABELA ---
 def get_cycles_df(concurso_maximo: Optional[int] = None, db_path: Path = DATABASE_PATH) -> Optional[pd.DataFrame]:
-    """ Lê os dados da tabela 'ciclos' e garante tipos INT padrão. """
     cycles_table_name = CYCLES_TABLE_NAME
     logger.info(f"Buscando dados da tabela '{cycles_table_name}' {('ate ' + str(concurso_maximo)) if concurso_maximo else ''}...")
     create_cycles_table(db_path);
@@ -109,11 +108,9 @@ def get_cycles_df(concurso_maximo: Optional[int] = None, db_path: Path = DATABAS
             log_msg = f"{len(df)} ciclos lidos da tabela '{cycles_table_name}'."
             if df is None: logger.error(f"Leitura de '{cycles_table_name}' retornou None."); return None
             if not df.empty:
-                 logger.debug(f"Tipos ANTES conversão get_cycles_df:\n{df.dtypes}")
                  for col in ['numero_ciclo', 'concurso_inicio', 'concurso_fim', 'duracao']:
                      if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                 logger.debug(f"Tipos DEPOIS conversão get_cycles_df:\n{df.dtypes}")
-            else: logger.info("Nenhum ciclo encontrado na tabela para o período.")
+            else: logger.info("Nenhum ciclo encontrado na tabela para o período especificado.")
             logger.info(log_msg)
             return df
     except Exception as e: logger.error(f"Erro ao ler '{cycles_table_name}': {e}"); return None
@@ -172,52 +169,80 @@ def calculate_current_intra_cycle_delay(current_cycle_start: Optional[int], conc
 
 
 # --- FUNÇÃO PARA CALCULAR STATS HISTÓRICOS DE ATRASO INTRA-CICLO ---
-def calculate_historical_intra_cycle_delay_stats(cycles_df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    # (Código completo como antes)
-    if cycles_df is None or cycles_df.empty: return None
-    logger.info(f"Calculando stats históricos de atraso intra-ciclo...")
-    all_intra_delays: Dict[int, List[int]] = {n: [] for n in ALL_NUMBERS}; processed_cycles = 0
-    for index, cycle_row in cycles_df.iterrows():
-        start_c, end_c, cycle_num = int(cycle_row['concurso_inicio']), int(cycle_row['concurso_fim']), int(cycle_row['numero_ciclo'])
+def calculate_historical_intra_cycle_delay_stats(cycles_df: Optional[pd.DataFrame],
+                                                 history_limit: int = 50
+                                                 ) -> Optional[pd.DataFrame]:
+    logger.info(f"Calculando stats históricos de atraso intra-ciclo (Últimos {history_limit} ciclos)...")
+    # Prepara resultado default
+    nan_series = pd.Series(np.nan, index=ALL_NUMBERS)
+    default_result_df = pd.DataFrame({ 'avg_hist_intra_delay': nan_series, 'max_hist_intra_delay': nan_series, 'std_hist_intra_delay': nan_series }, index=pd.Index(ALL_NUMBERS, name='dezena'))
+
+    if cycles_df is None or cycles_df.empty: return default_result_df
+    recent_cycles_df = cycles_df.tail(history_limit).copy()
+    if recent_cycles_df.empty: return default_result_df
+
+    logger.info(f"Analisando {len(recent_cycles_df)} ciclos recentes para atraso intra-ciclo...")
+    all_intra_delays: Dict[int, List[int]] = {n: [] for n in ALL_NUMBERS}
+
+    for index, cycle_row in recent_cycles_df.iterrows():
+        try: start_c, end_c, cycle_num = int(cycle_row['concurso_inicio']), int(cycle_row['concurso_fim']), int(cycle_row['numero_ciclo'])
+        except Exception as e: logger.error(f"Erro linha ciclo {index}: {e}"); continue
+
         df_cycle = read_data_from_db(columns=BASE_COLS, concurso_minimo=start_c, concurso_maximo=end_c)
         if df_cycle is None or df_cycle.empty: continue
+
         last_seen_in_this_cycle: Dict[int, int] = {}
         for _, draw_row in df_cycle.iterrows():
-            current_concurso = int(draw_row['concurso'])
-            drawn_numbers = set(int(num) for num in draw_row[NEW_BALL_COLUMNS].dropna().values)
+            try:
+                current_concurso = int(draw_row['concurso'])
+                drawn_numbers = {int(n) for n in draw_row[NEW_BALL_COLUMNS].dropna().values if pd.notna(n)}
+                if not drawn_numbers: continue
+            except Exception as e: logger.warning(f"Erro processar linha {draw_row.get('concurso')} ciclo {cycle_num}: {e}"); continue
+
             for n in drawn_numbers:
-                if n in last_seen_in_this_cycle: delay = current_concurso - last_seen_in_this_cycle[n] - 1; all_intra_delays[n].append(delay)
-                last_seen_in_this_cycle[n] = current_concurso
-        processed_cycles += 1;
+                if n in last_seen_in_this_cycle:
+                    try:
+                        delay = current_concurso - last_seen_in_this_cycle[n] - 1
+                        if delay >= 0: # Garante não negativo
+                           # Garante que estamos adicionando inteiros
+                           all_intra_delays[n].append(int(delay))
+                        else: logger.error(f"Delay negativo! Ciclo {cycle_num}, Dezena {n}, Conc {current_concurso}, LastSeen {last_seen_in_this_cycle[n]}")
+                    except Exception as e: logger.error(f"Erro calc/append delay {n} conc {current_concurso}: {e}")
+                last_seen_in_this_cycle[n] = current_concurso # Atualiza mesmo se for a primeira vez
+
+    # --- Cálculo final com mais logs ---
     stats_data = []
+    # logger.debug(f"Calculando médias/max/std a partir das listas de delays...")
     for n in ALL_NUMBERS:
-        delays = all_intra_delays[n]; mean_delay, max_delay_calc, std_dev_delay = np.nan, 0, np.nan
-        if delays: mean_delay = np.mean(delays); max_delay_calc = np.max(delays);
-        if len(delays) > 1: std_dev_delay = np.std(delays, ddof=1)
-        elif len(delays) == 1: std_dev_delay = 0
+        delays = all_intra_delays[n]
+        # logger.debug(f"Dezena {n}: Lista de Delays = {delays}") # Loga a lista de delays!
+        mean_delay, max_delay_calc, std_dev_delay = np.nan, np.nan, np.nan
+        if delays: # Verifica se a lista não é vazia
+             try:
+                 # Garante que a lista contém apenas números antes de calcular
+                 numeric_delays = [d for d in delays if isinstance(d, (int, float)) and np.isfinite(d)]
+                 if numeric_delays: # Recalcula só se tiver números válidos
+                      mean_delay = np.mean(numeric_delays)
+                      max_delay_calc = np.max(numeric_delays)
+                      if len(numeric_delays) > 1: std_dev_delay = np.std(numeric_delays, ddof=1)
+                      elif len(numeric_delays) == 1: std_dev_delay = 0.0
+                 else: logger.warning(f"Lista de delays para dezena {n} não contém números válidos após limpeza: {delays}")
+             except Exception as e: logger.error(f"Erro ao calcular stats para dezena {n} com delays {delays}: {e}")
         stats_data.append({'dezena': n, 'avg_hist_intra_delay': mean_delay, 'max_hist_intra_delay': max_delay_calc, 'std_hist_intra_delay': std_dev_delay})
+
     results_df = pd.DataFrame(stats_data).set_index('dezena')
-    logger.info("Stats históricos de atraso intra-ciclo concluídos."); return results_df
+    logger.info("Stats históricos de atraso intra-ciclo (limitado) concluídos."); return results_df
+
 
 
 # --- FUNÇÃO PARA CALCULAR STATS DE FECHAMENTO ---
-# (Código completo como antes, com verificação .empty)
 def calculate_closing_number_stats(concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
-    """ Analisa quais dezenas foram responsáveis por fechar cada ciclo completo. """
+    # ... (código completo e correto da função) ...
     logger.info(f"Calculando estatísticas de fechamento de ciclo...")
-    # Chama get_cycles_df LOCAL (corrigido)
     cycles_df = get_cycles_df(concurso_maximo=concurso_maximo)
-
-    # Verificação padrão
-    if cycles_df is None or cycles_df.empty:
-        logger.warning(f"Nenhum ciclo completo encontrado/erro.")
-        return pd.DataFrame({'closing_freq': 0,'sole_closing_freq': 0}, index=pd.Index(ALL_NUMBERS, name='dezena'))
-
-    df_len = len(cycles_df)
-    logger.info(f"Analisando {df_len} ciclos completos para fechamento...")
+    if cycles_df is None or cycles_df.empty: logger.warning(f"Nenhum ciclo completo encontrado/erro."); return pd.DataFrame({'closing_freq': 0,'sole_closing_freq': 0}, index=pd.Index(ALL_NUMBERS, name='dezena'))
+    df_len = len(cycles_df); logger.info(f"Analisando {df_len} ciclos completos para fechamento...")
     closing_counter = Counter(); sole_closing_counter = Counter(); processed_cycles = 0
-
-    # Loop principal (Restaurado)
     for index, cycle_row in cycles_df.iterrows():
         try: cycle_num, start_c, end_c = int(cycle_row['numero_ciclo']), int(cycle_row['concurso_inicio']), int(cycle_row['concurso_fim'])
         except Exception as e: logger.error(f"Erro linha ciclo {index}: {e}"); continue
@@ -233,19 +258,16 @@ def calculate_closing_number_stats(concurso_maximo: Optional[int] = None) -> Opt
         if union_set != ALL_NUMBERS_SET: logger.warning(f"Inconsistência ciclo {cycle_num}."); continue
         missing_before_end = ALL_NUMBERS_SET - seen_before_end; closing_numbers = drawn_at_end.intersection(missing_before_end)
         if not closing_numbers: logger.warning(f"Ciclo {cycle_num} sem fechadoras?"); continue
-        closing_counter.update(closing_numbers)
+        closing_counter.update(closing_numbers);
         if len(closing_numbers) == 1: sole_closing_counter.update(closing_numbers)
         processed_cycles += 1
         if processed_cycles % 100 == 0: logger.info(f"{processed_cycles}/{df_len} ciclos proc. p/ fechamento...")
-
     stats_df = pd.DataFrame(index=pd.Index(ALL_NUMBERS, name='dezena')); stats_df['closing_freq'] = stats_df.index.map(closing_counter).fillna(0).astype(int); stats_df['sole_closing_freq'] = stats_df.index.map(sole_closing_counter).fillna(0).astype(int)
     logger.info("Cálculo de stats de fechamento concluído."); return stats_df
 
 
 # --- FUNÇÃO PARA EXIBIR STATS DE CICLOS SELECIONADOS ---
-# (Com indentação correta)
 def run_cycle_frequency_analysis(cycles_df: pd.DataFrame, num_cycles_each_end: int = 3):
-    """ Calcula e EXIBE a frequência das dezenas para ciclos selecionados. """
     if cycles_df is None or cycles_df.empty: logger.warning("DF ciclos vazio."); return
     logger.info(f"Calculando/Exibindo frequência para ciclos selecionados...")
     cycle_freq_dict = calculate_frequency_per_cycle(cycles_df);
@@ -266,15 +288,8 @@ def run_cycle_frequency_analysis(cycles_df: pd.DataFrame, num_cycles_each_end: i
     for cycle_num, cycle_name in display_items:
         freq_series = cycle_freq_dict.get(cycle_num)
         if freq_series is not None and not freq_series.empty:
-            print(f"\n>> Frequência no {cycle_name} <<")
-            try:
-                print("Top 5 +:") # Indentado
-                print(freq_series.nlargest(min(5, len(freq_series))).to_string()) # Indentado
-                print("\nTop 5 -:") # Indentado
-                print(freq_series.nsmallest(min(5, len(freq_series))).to_string()) # Indentado
-                print("-" * 30) # Indentado
-            except Exception as e:
-                 logger.error(f"Erro ao obter top/bottom 5 para ciclo {cycle_num}: {e}") # Indentado
-        else:
-            logger.warning(f"Frequência não encontrada ou vazia para ciclo {cycle_num}") # Indentado
+            print(f"\n>> Frequência no {cycle_name} <<");
+            try: print("Top 5 +:"); print(freq_series.nlargest(min(5, len(freq_series))).to_string()); print("\nTop 5 -:"); print(freq_series.nsmallest(min(5, len(freq_series))).to_string()); print("-" * 30)
+            except Exception as e: logger.error(f"Erro top/bottom 5 ciclo {cycle_num}: {e}")
+        else: logger.warning(f"Freq. não encontrada/vazia para ciclo {cycle_num}")
     logger.info("Análise de frequência por ciclo concluída (resumo impresso).")
