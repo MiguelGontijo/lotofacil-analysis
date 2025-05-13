@@ -23,7 +23,7 @@ for handler in current_handlers:
     logging.root.removeHandler(handler)
 
 logging.basicConfig(
-    level=logging.INFO, # Mude para logging.DEBUG para ver os logs de depuração de cycle_analysis, etc.
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(log_file_path, mode='a'),
@@ -39,9 +39,10 @@ ANALYSIS_PIPELINE = [
     {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "pair-combination-analysis", "func": ps.run_pair_combination_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     
-    # Análises de Ciclo
-    {"name": "cycle-identification-stats", "func": ps.run_cycle_identification_and_stats, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Mantém a atual por enquanto
-    {"name": "cycle-progression", "func": ps.run_cycle_progression_analysis_step, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # <<< NOVA ETAPA DETALHADA
+    {"name": "cycle-identification-stats", "func": ps.run_cycle_identification_and_stats, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    {"name": "cycle-progression", "func": ps.run_cycle_progression_analysis_step, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    # NOVA ETAPA DE MÉTRICAS DETALHADAS POR CICLO - depende de 'ciclos_detalhe' e 'all_data_df'
+    {"name": "detailed-cycle-metrics", "func": ps.run_detailed_cycle_metrics_step, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # <<< ADICIONADO
     {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, 
     
     {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
@@ -77,21 +78,17 @@ ANALYSIS_PIPELINE = [
     },
 ]
 
-# ... (restante do arquivo main.py, incluindo run_orchestrator_process e o bloco if __name__ == "__main__":, mantidos como na última versão) ...
 def run_orchestrator_process(
     force_reload_data: bool = False,
     selected_analyses: Optional[List[str]] = None
 ):
+    # ... (código da função run_orchestrator_process mantido como na versão anterior) ...
     logger.info("Iniciando o processo de análise da Lotofácil.")
-
     raw_data_filepath = DATA_DIR / RAW_DATA_FILE_NAME
     cleaned_data_filepath = DATA_DIR / CLEANED_DATA_FILE_NAME
     db_filepath = DATA_DIR / DB_FILE_NAME
-
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    
     db_manager = DatabaseManager(db_path=str(db_filepath))
-    
     all_data_df = None
     if not force_reload_data and cleaned_data_filepath.exists():
         logger.info(f"Carregando dados limpos de: {cleaned_data_filepath}")
@@ -107,41 +104,35 @@ def run_orchestrator_process(
         else:
             logger.error(f"Arquivo de dados brutos '{RAW_DATA_FILE_NAME}' não encontrado em: {raw_data_filepath}. Encerrando.")
             return
-
     if all_data_df is None or all_data_df.empty:
         logger.error("Não foi possível carregar ou processar os dados da Lotofácil. Encerrando.")
         return
-
     pipeline_to_run = ANALYSIS_PIPELINE
     if selected_analyses:
         logger.info(f"Executando análises selecionadas: {selected_analyses}")
         temp_pipeline = [step for step in ANALYSIS_PIPELINE if step["name"] in selected_analyses]
-        if temp_pipeline: # Só reordena se houver etapas correspondentes
+        if temp_pipeline:
             name_to_step = {step["name"]: step for step in temp_pipeline}
             ordered_pipeline = []
-            processed_names = set() # Para evitar duplicatas se o mesmo nome for passado múltiplas vezes
+            processed_names = set()
             for name in selected_analyses:
                 if name in name_to_step and name not in processed_names:
                     ordered_pipeline.append(name_to_step[name])
                     processed_names.add(name)
             pipeline_to_run = ordered_pipeline
-        else: # Se temp_pipeline for vazio (nenhum nome correspondeu)
-             pipeline_to_run = temp_pipeline # Será uma lista vazia
-
+        else:
+             pipeline_to_run = temp_pipeline
         if not pipeline_to_run:
-            logger.warning(f"Nenhuma das análises selecionadas ({selected_analyses}) foi encontrada no pipeline. Nenhuma etapa será executada.")
+            logger.warning(f"Nenhuma das análises selecionadas ({selected_analyses}) foi encontrada. Nenhuma etapa será executada.")
         else:
             logger.info(f"Etapas a serem executadas nesta ordem: {[step['name'] for step in pipeline_to_run]}")
-
     orchestrator = Orchestrator(pipeline=pipeline_to_run, db_manager=db_manager)
     orchestrator.set_shared_context("all_data_df", all_data_df)
     orchestrator.set_shared_context("db_manager", db_manager)
     orchestrator.set_shared_context("plot_dir_context", PLOT_DIR_CONFIG)
-
     if not pipeline_to_run:
-        logger.info("Pipeline vazio devido à seleção de análises. Encerrando processo de orquestração.")
+        logger.info("Pipeline vazio. Encerrando processo de orquestração.")
         return
-
     logger.info("Executando o pipeline de análise...")
     orchestrator.run()
     logger.info("Pipeline de análise concluído.")
@@ -159,7 +150,6 @@ if __name__ == "__main__":
         help="Força o recarregamento e limpeza dos dados brutos."
     )
     args = parser.parse_args()
-
     run_orchestrator_process(
         force_reload_data=args.force_reload,
         selected_analyses=args.analysis
