@@ -1,148 +1,173 @@
 # src/analysis/delay_analysis.py
-
 import pandas as pd
-import numpy as np # Para std dev
-from typing import Optional, Dict, List, Set, Tuple # Adicionado Tuple
+import numpy as np # Pode ser útil para cálculos numéricos
+from typing import Dict, List, Tuple, Any # Adicionado Tuple, Any
+import logging # ADICIONADO
 
-from src.database_manager import read_data_from_db
-from src.config import logger, NEW_BALL_COLUMNS
+from src.config import ALL_NUMBERS # ALL_NUMBERS é uma lista de 1 a 25
 
-ALL_NUMBERS: List[int] = list(range(1, 26))
-BASE_COLS: List[str] = ['concurso'] + NEW_BALL_COLUMNS
+logger = logging.getLogger(__name__) # Logger específico para este módulo
 
+def get_draw_matrix(all_data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cria uma matriz booleana (ou 0/1) indicando a presença de cada dezena em cada concurso.
+    Linhas: Concursos (ordenados)
+    Colunas: Dezenas (1 a 25)
+    Valores: 1 se a dezena saiu, 0 caso contrário.
+    """
+    if all_data_df.empty or 'Concurso' not in all_data_df.columns:
+        logger.warning("DataFrame de entrada para get_draw_matrix está vazio ou sem coluna 'Concurso'.")
+        return pd.DataFrame()
 
-def calculate_current_delay(concurso_maximo: Optional[int] = None) -> Optional[pd.Series]:
-    """ Calcula o atraso atual das dezenas. Retorna Series ou None. """
-    # (Código idêntico ao da versão anterior correta)
-    logger.info(f"Calculando atraso atual até {concurso_maximo or 'último'}...")
-    df = read_data_from_db(columns=BASE_COLS, concurso_maximo=concurso_maximo);
-    if df is None or df.empty: return None
-    if not all(col in df.columns for col in NEW_BALL_COLUMNS): return None
-    effective_max_concurso_val = df['concurso'].max();
-    if pd.isna(effective_max_concurso_val): return None
-    effective_max_concurso = int(effective_max_concurso_val)
-    logger.info(f"Ref. atraso: Concurso {effective_max_concurso}")
-    last_seen: Dict[int, int] = {}; delays: Dict[int, object] = {}
-    for index, row in df.iloc[::-1].iterrows():
-        current_concurso_scan_val = row['concurso'];
-        if pd.isna(current_concurso_scan_val): continue
-        current_concurso_scan = int(current_concurso_scan_val)
-        drawn_numbers: Set[int] = set(int(num) for num in row[NEW_BALL_COLUMNS].dropna().values)
-        for number in ALL_NUMBERS:
-            if number not in last_seen and number in drawn_numbers: last_seen[number] = current_concurso_scan
-        if len(last_seen) == len(ALL_NUMBERS): break
+    dezena_cols = [f'bola_{i}' for i in range(1, 16)]
+    actual_dezena_cols = [col for col in dezena_cols if col in all_data_df.columns]
+    if not actual_dezena_cols:
+        logger.error("Nenhuma coluna de bola encontrada em all_data_df para get_draw_matrix.")
+        return pd.DataFrame()
+
+    # Garante que os concursos estão ordenados
+    df_sorted = all_data_df.sort_values(by='Concurso').set_index('Concurso')
+    
+    draw_matrix_list = []
+    for contest_id, row in df_sorted.iterrows():
+        drawn_numbers = set(row[actual_dezena_cols].dropna().astype(int))
+        contest_presence = {number: 1 if number in drawn_numbers else 0 for number in ALL_NUMBERS}
+        contest_presence['Concurso'] = contest_id # Mantém o ID do concurso para referência, se necessário
+        draw_matrix_list.append(contest_presence)
+    
+    if not draw_matrix_list:
+        logger.warning("Nenhum dado processado para a matriz de sorteios.")
+        return pd.DataFrame()
+
+    # Cria DataFrame e define o índice se Concurso foi adicionado
+    # Se Concurso não for necessário como coluna, pode ser o índice diretamente.
+    draw_matrix_df = pd.DataFrame(draw_matrix_list)
+    if 'Concurso' in draw_matrix_df.columns:
+        draw_matrix_df = draw_matrix_df.set_index('Concurso')
+    
+    # Garante que todas as colunas de dezenas (ALL_NUMBERS) existam
     for number in ALL_NUMBERS:
-        last_seen_concurso = last_seen.get(number)
-        if last_seen_concurso is not None: delays[number] = effective_max_concurso - last_seen_concurso
-        else: logger.warning(f"Dezena {number} não encontrada. Atraso NA."); delays[number] = pd.NA
-    delay_series = pd.Series(delays, name='Atraso Atual').sort_index();
-    try: delay_series = delay_series.astype('Int64')
-    except: pass
-    logger.info("Cálculo de atraso atual concluído."); return delay_series
+        if number not in draw_matrix_df.columns:
+            draw_matrix_df[number] = 0 # Adiciona coluna com zeros se alguma dezena nunca saiu
+
+    return draw_matrix_df[ALL_NUMBERS] # Retorna apenas as colunas das dezenas, indexadas por Concurso
 
 
-def calculate_max_delay(concurso_maximo: Optional[int] = None) -> Optional[pd.Series]:
-    """ Calcula o atraso máximo histórico. Retorna Series ou None. """
-    # (Código idêntico ao da versão anterior correta)
-    logger.info(f"Calculando atraso máximo histórico até {concurso_maximo or 'último'}...")
-    df = read_data_from_db(columns=BASE_COLS, concurso_maximo=concurso_maximo);
-    if df is None or df.empty: return None
-    if not all(col in df.columns for col in NEW_BALL_COLUMNS): return None
-    effective_max_concurso_val = df['concurso'].max(); first_concurso_val = df['concurso'].min()
-    if pd.isna(effective_max_concurso_val) or pd.isna(first_concurso_val): return None
-    effective_max_concurso = int(effective_max_concurso_val); first_concurso = int(first_concurso_val)
-    last_seen_concurso: Dict[int, int] = {n: first_concurso - 1 for n in ALL_NUMBERS}; max_delay: Dict[int, int] = {n: 0 for n in ALL_NUMBERS}
-    logger.info(f"Analisando concursos de {first_concurso} a {effective_max_concurso}...")
-    for index, row in df.iterrows():
-        current_concurso_val = row['concurso'];
-        if pd.isna(current_concurso_val): continue
-        current_concurso = int(current_concurso_val)
-        drawn_numbers: Set[int] = set(int(num) for num in row[NEW_BALL_COLUMNS].dropna().values)
-        for n in ALL_NUMBERS:
-            if n in drawn_numbers:
-                if last_seen_concurso[n] >= first_concurso: current_delay = current_concurso - last_seen_concurso[n] - 1; max_delay[n] = max(max_delay[n], current_delay)
-                last_seen_concurso[n] = current_concurso
-    logger.debug("Verificando atraso final...")
-    for n in ALL_NUMBERS:
-         if last_seen_concurso[n] >= first_concurso: final_delay = effective_max_concurso - last_seen_concurso[n]; max_delay[n] = max(max_delay[n], final_delay)
-         else: logger.warning(f"Dezena {n} nunca vista."); max_delay[n] = effective_max_concurso - first_concurso + 1
-    max_delay_series = pd.Series(max_delay, name='Atraso Máximo Histórico').sort_index().astype(int)
-    logger.info("Cálculo de atraso máximo histórico concluído."); return max_delay_series
-
-
-# --- NOVA FUNÇÃO ---
-def calculate_delay_stats(concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
+def calculate_current_delay(all_data_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcula estatísticas de atraso (intervalo entre aparições) para cada dezena.
-
-    Args:
-        concurso_maximo (Optional[int]): O último concurso a considerar.
-
-    Returns:
-        Optional[pd.DataFrame]: DataFrame com colunas 'media_atraso', 'std_dev_atraso',
-                                'max_atraso_calculado' (igual a calculate_max_delay),
-                                indexado por dezena (1-25), ou None se erro.
+    Calcula o atraso atual (gap) de cada dezena.
+    O atraso atual é o número de concursos desde a última vez que a dezena foi sorteada.
     """
-    logger.info(f"Calculando estatísticas de atraso (média, std dev) até {concurso_maximo or 'último'}...")
-    df = read_data_from_db(columns=BASE_COLS, concurso_maximo=concurso_maximo)
-    if df is None or df.empty: return None
-    if not all(col in df.columns for col in NEW_BALL_COLUMNS): return None
+    logger.info("Calculando atraso atual das dezenas.")
+    if all_data_df.empty:
+        logger.warning("DataFrame vazio para calculate_current_delay.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Atual': []})
 
-    effective_max_concurso = int(df['concurso'].max())
-    first_concurso = int(df['concurso'].min())
+    draw_matrix = get_draw_matrix(all_data_df)
+    if draw_matrix.empty:
+        logger.warning("Matriz de sorteios vazia, não é possível calcular o atraso atual.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Atual': []})
 
-    # Dicionário para armazenar a lista de atrasos de cada número
-    delays_list: Dict[int, List[int]] = {n: [] for n in ALL_NUMBERS}
-    last_seen_concurso: Dict[int, int] = {n: first_concurso - 1 for n in ALL_NUMBERS}
-
-    logger.info(f"Analisando concursos de {first_concurso} a {effective_max_concurso} para stats de atraso...")
-    for index, row in df.iterrows():
-        current_concurso = int(row['concurso'])
-        drawn_numbers = set(int(num) for num in row[NEW_BALL_COLUMNS].dropna().values)
-        for n in ALL_NUMBERS:
-            if n in drawn_numbers:
-                if last_seen_concurso[n] >= first_concurso:
-                     # Atraso = intervalo entre aparições
-                     current_delay = current_concurso - last_seen_concurso[n] - 1
-                     delays_list[n].append(current_delay)
-                last_seen_concurso[n] = current_concurso
-
-    # Calcula o atraso final para incluir na média/std dev?
-    # Pode enviesar a média/std dev. Melhor não incluir por enquanto.
-    # Ou incluir apenas se quisermos o Max Delay como parte do DF retornado.
-
-    results_data = []
-    for n in ALL_NUMBERS:
-        delays = delays_list[n]
-        if len(delays) > 1: # Precisa de pelo menos 2 atrasos para calcular std dev
-            mean_delay = np.mean(delays)
-            std_dev_delay = np.std(delays, ddof=1) # ddof=1 para sample std dev
-            max_delay_calc = np.max(delays) if delays else 0
-        elif len(delays) == 1: # Se só apareceu 1x (após a primeira), só temos 1 atraso
-             mean_delay = delays[0]
-             std_dev_delay = 0 # Ou NaN? Vamos usar 0
-             max_delay_calc = delays[0]
-        else: # Se nunca apareceu (depois da primeira vez) ou só apareceu 1 vez
-            mean_delay = np.nan
-            std_dev_delay = np.nan
-            max_delay_calc = 0 # Ou o atraso máximo histórico? Vamos pegar do calculate_max_delay depois
-
-        # Recalcula o max_delay incluindo o final para consistência
-        max_delay_final = 0
-        if last_seen_concurso[n] >= first_concurso:
-             final_delay_val = effective_max_concurso - last_seen_concurso[n]
-             max_delay_final = max(max_delay_calc, final_delay_val)
-        elif not delays: # Nunca visto
-             max_delay_final = effective_max_concurso - first_concurso + 1
+    current_delays = {}
+    for dezena in draw_matrix.columns: # As colunas são as dezenas (ALL_NUMBERS)
+        series_dezena = draw_matrix[dezena]
+        # Encontra o índice (Concurso) da última ocorrência (valor 1)
+        last_occurrence_idx = series_dezena[series_dezena == 1].index.max()
+        
+        if pd.isna(last_occurrence_idx): # Dezena nunca saiu
+            current_delays[dezena] = len(draw_matrix) # Atraso é o número total de concursos
+        else:
+            # O atraso é o número total de concursos MENOS o índice do concurso da última ocorrência.
+            # Assumindo que os índices de draw_matrix são os números dos concursos (1-based).
+            # Se draw_matrix.index.max() é o último concurso, então:
+            current_delays[dezena] = draw_matrix.index.max() - last_occurrence_idx
+            
+    delay_df = pd.DataFrame(list(current_delays.items()), columns=['Dezena', 'Atraso Atual'])
+    delay_df['Dezena'] = delay_df['Dezena'].astype(int)
+    delay_df['Atraso Atual'] = delay_df['Atraso Atual'].astype(int)
+    logger.info("Atraso atual calculado.")
+    return delay_df.sort_values(by='Atraso Atual', ascending=False)
 
 
-        results_data.append({
-            'dezena': n,
-            'media_atraso': mean_delay,
-            'std_dev_atraso': std_dev_delay,
-            'max_atraso': max_delay_final # Inclui o max_delay completo
-        })
+def calculate_max_delay(all_data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula o atraso máximo (maior gap) que cada dezena já teve.
+    """
+    logger.info("Calculando atraso máximo das dezenas.")
+    if all_data_df.empty:
+        logger.warning("DataFrame vazio para calculate_max_delay.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Maximo': []})
 
-    results_df = pd.DataFrame(results_data).set_index('dezena')
-    logger.info("Cálculo de estatísticas de atraso concluído.")
-    return results_df
+    draw_matrix = get_draw_matrix(all_data_df) # Colunas são as dezenas
+    if draw_matrix.empty:
+        logger.warning("Matriz de sorteios vazia, não é possível calcular o atraso máximo.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Maximo': []})
+
+    max_delays = {}
+    for dezena in draw_matrix.columns:
+        series_dezena = draw_matrix[dezena]
+        # Identifica os concursos onde a dezena saiu (valor 1)
+        occurrences = series_dezena[series_dezena == 1].index.tolist()
+        
+        if not occurrences: # Dezena nunca saiu
+            max_delays[dezena] = len(draw_matrix)
+            continue
+        
+        # Calcula gaps entre ocorrências
+        gaps = []
+        # Gap inicial (do concurso 0 até a primeira ocorrência)
+        # Se os índices são 1-based, o gap é occurrences[0] - 1
+        gaps.append(occurrences[0] - 1) 
+        
+        for i in range(len(occurrences) - 1):
+            gaps.append(occurrences[i+1] - occurrences[i] - 1)
+            
+        # Gap final (da última ocorrência até o último concurso)
+        gaps.append(draw_matrix.index.max() - occurrences[-1])
+        
+        max_delays[dezena] = max(gaps) if gaps else 0 # Se só saiu uma vez e no primeiro concurso, gaps pode ser vazio.
+        
+    delay_df = pd.DataFrame(list(max_delays.items()), columns=['Dezena', 'Atraso Maximo'])
+    delay_df['Dezena'] = delay_df['Dezena'].astype(int)
+    delay_df['Atraso Maximo'] = delay_df['Atraso Maximo'].astype(int)
+    logger.info("Atraso máximo calculado.")
+    return delay_df.sort_values(by='Atraso Maximo', ascending=False)
+
+
+def calculate_mean_delay(all_data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula o atraso médio (média dos gaps) de cada dezena.
+    """
+    logger.info("Calculando atraso médio das dezenas.")
+    if all_data_df.empty:
+        logger.warning("DataFrame vazio para calculate_mean_delay.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Medio': []})
+
+    draw_matrix = get_draw_matrix(all_data_df) # Colunas são as dezenas
+    if draw_matrix.empty:
+        logger.warning("Matriz de sorteios vazia, não é possível calcular o atraso médio.")
+        return pd.DataFrame({'Dezena': [], 'Atraso Medio': []})
+
+    mean_delays = {}
+    for dezena in draw_matrix.columns:
+        series_dezena = draw_matrix[dezena]
+        occurrences = series_dezena[series_dezena == 1].index.tolist()
+        
+        if len(occurrences) < 2: # Precisa de pelo menos duas ocorrências para ter um gap entre elas
+            # Se nunca saiu, ou saiu uma vez, o conceito de atraso médio entre aparições é menos definido.
+            # Poderíamos retornar NaN, 0, ou o atraso total se nunca saiu.
+            # Para simplificar, se não há gaps entre ocorrências, o atraso médio é 0 ou indefinido.
+            mean_delays[dezena] = np.nan # Ou 0, ou len(draw_matrix) se nunca saiu
+            continue
+            
+        gaps_between_occurrences = []
+        for i in range(len(occurrences) - 1):
+            gaps_between_occurrences.append(occurrences[i+1] - occurrences[i] - 1)
+        
+        mean_delays[dezena] = np.mean(gaps_between_occurrences) if gaps_between_occurrences else np.nan
+        
+    delay_df = pd.DataFrame(list(mean_delays.items()), columns=['Dezena', 'Atraso Medio'])
+    delay_df['Dezena'] = delay_df['Dezena'].astype(int)
+    # Atraso médio pode ser float
+    logger.info("Atraso médio calculado.")
+    return delay_df.sort_values(by='Atraso Medio', ascending=False)

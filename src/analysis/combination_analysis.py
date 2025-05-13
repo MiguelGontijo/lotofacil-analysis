@@ -1,47 +1,142 @@
 # src/analysis/combination_analysis.py
-
 import pandas as pd
-from itertools import combinations
+from itertools import combinations as iter_combinations # Renomeado para evitar conflito de nome se houver uma variável combinations
 from collections import Counter
-from typing import Optional, List, Tuple
+import logging # ADICIONADO
+from typing import List, Tuple, Any # Adicionado para type hints
 
-from src.database_manager import read_data_from_db
-from src.config import logger, NEW_BALL_COLUMNS
+# Importar constantes necessárias de config.py, se houver.
+# Para esta análise, ALL_NUMBERS pode não ser estritamente necessário,
+# mas é bom ter se quisermos garantir que apenas números válidos sejam considerados.
+from src.config import ALL_NUMBERS
 
-BASE_COLS = ['concurso'] + NEW_BALL_COLUMNS
+logger = logging.getLogger(__name__) # Logger específico para este módulo
 
-def calculate_combination_frequency(combination_size: int,
-                                    top_n: int = 20,
-                                    concurso_maximo: Optional[int] = None) -> List[Tuple[Tuple[int, ...], int]]:
+def get_draws_from_dataframe(all_data_df: pd.DataFrame) -> List[List[int]]:
     """
-    Calcula a frequência de combinações de N dezenas sorteadas juntas.
-    RETORNA: Lista de tuplas [(combinacao, contagem)] ou lista vazia.
+    Extrai todos os sorteios (listas de dezenas) do DataFrame principal.
     """
-    if not 2 <= combination_size <= 15:
-        logger.error(f"Tamanho inválido: {combination_size}. Use 2 a 15.")
+    if all_data_df is None or all_data_df.empty:
+        logger.warning("DataFrame de entrada para get_draws_from_dataframe está vazio.")
         return []
 
-    size_name_map = {2:"pares", 3:"trios", 4:"quartetos", 5:"quintetos", 6:"sextetos"}
-    size_name = size_name_map.get(combination_size, f"{combination_size}-tuplas")
-    logger.info(f"Calculando frequência de {size_name} até {concurso_maximo or 'último'}...")
+    dezena_cols = [f'bola_{i}' for i in range(1, 16)]
+    actual_dezena_cols = [col for col in dezena_cols if col in all_data_df.columns]
 
-    df = read_data_from_db(columns=BASE_COLS, concurso_maximo=concurso_maximo)
-    if df is None or df.empty:
-        logger.warning("Nenhum dado para calcular frequências de combinação.")
-        return []
-    if not all(col in df.columns for col in NEW_BALL_COLUMNS):
-        logger.error("Dados lidos não contêm colunas de bolas esperadas.")
-        return []
+    if len(actual_dezena_cols) < 15: # Lotofácil sempre tem 15 dezenas
+        logger.warning(f"Esperava 15 colunas de bolas, encontrou {len(actual_dezena_cols)}. Usando as existentes: {actual_dezena_cols}")
+        if not actual_dezena_cols:
+            logger.error("Nenhuma coluna de bola encontrada em all_data_df para extrair sorteios.")
+            return []
+    
+    draws = []
+    for index, row in all_data_df.iterrows():
+        try:
+            # Converte para int e remove NaNs que podem ter vindo de dados brutos
+            current_draw = [int(num) for num in row[actual_dezena_cols].dropna().values]
+            if len(current_draw) == 15: # Validar se temos 15 dezenas válidas
+                draws.append(sorted(current_draw)) # Ordena para consistência nas combinações
+            else:
+                logger.debug(f"Sorteio do concurso {row.get('Concurso', index)} não tem 15 dezenas válidas ({len(current_draw)} encontradas). Pulando.")
+        except ValueError as ve:
+            logger.warning(f"Erro ao converter dezenas para int no concurso {row.get('Concurso', index)}: {ve}. Pulando sorteio.")
+        except Exception as e:
+            logger.error(f"Erro inesperado ao processar sorteio do concurso {row.get('Concurso', index)}: {e}", exc_info=True)
+            
+    return draws
 
-    combination_counter = Counter()
-    for index, row in df.iterrows():
-        # Garante que são inteiros e remove NAs
-        drawn_numbers = [int(num) for num in row[NEW_BALL_COLUMNS].dropna().values]
-        if len(drawn_numbers) >= combination_size:
-            for combo in combinations(drawn_numbers, combination_size):
-                combination_counter[tuple(sorted(combo))] += 1
-        # else: logger.warning(...) # Aviso se concurso tiver < 15 bolas
 
-    most_common_combos = combination_counter.most_common(top_n)
-    logger.info(f"Cálculo de frequência de {size_name} concluído. {len(combination_counter)} únicas encontradas.")
-    return most_common_combos # <<< RETORNA A LISTA
+def calculate_pair_frequencies(all_data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula a frequência de todos os pares de dezenas que foram sorteados juntos.
+
+    Args:
+        all_data_df: DataFrame com todos os concursos.
+
+    Returns:
+        DataFrame com colunas 'Dezena1', 'Dezena2', 'Frequencia'.
+        Retorna DataFrame vazio em caso de erro.
+    """
+    logger.info("Calculando frequência de pares de dezenas.")
+    draws = get_draws_from_dataframe(all_data_df)
+
+    if not draws:
+        logger.warning("Nenhum sorteio válido encontrado para calcular frequência de pares.")
+        return pd.DataFrame({'Dezena1': [], 'Dezena2': [], 'Frequencia': []})
+
+    pair_counter: Counter = Counter()
+    for draw in draws:
+        # Gera todas as combinações de 2 dezenas para o sorteio atual
+        # A lista 'draw' já está ordenada por get_draws_from_dataframe
+        for pair in iter_combinations(draw, 2):
+            pair_counter[pair] += 1
+    
+    if not pair_counter:
+        logger.info("Nenhum par encontrado ou contado.")
+        return pd.DataFrame({'Dezena1': [], 'Dezena2': [], 'Frequencia': []})
+
+    # Converte o Counter para um DataFrame
+    pairs_data = []
+    for pair_tuple, freq in pair_counter.items():
+        pairs_data.append({'Dezena1': pair_tuple[0], 'Dezena2': pair_tuple[1], 'Frequencia': freq})
+    
+    pairs_df = pd.DataFrame(pairs_data)
+    
+    if pairs_df.empty:
+        logger.info("DataFrame de frequência de pares resultante está vazio.")
+    else:
+        logger.info(f"Frequência de pares calculada para {len(pairs_df)} pares distintos.")
+        pairs_df = pairs_df.sort_values(by='Frequencia', ascending=False)
+        
+    return pairs_df
+
+
+def calculate_trio_frequencies(all_data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula a frequência de todos os trios de dezenas que foram sorteados juntos.
+    (Implementação similar a calculate_pair_frequencies)
+
+    Args:
+        all_data_df: DataFrame com todos os concursos.
+
+    Returns:
+        DataFrame com colunas 'Dezena1', 'Dezena2', 'Dezena3', 'Frequencia'.
+        Retorna DataFrame vazio em caso de erro.
+    """
+    logger.info("Calculando frequência de trios de dezenas.")
+    draws = get_draws_from_dataframe(all_data_df)
+
+    if not draws:
+        logger.warning("Nenhum sorteio válido encontrado para calcular frequência de trios.")
+        return pd.DataFrame({'Dezena1': [], 'Dezena2': [], 'Dezena3': [], 'Frequencia': []})
+
+    trio_counter: Counter = Counter()
+    for draw in draws:
+        # Gera todas as combinações de 3 dezenas para o sorteio atual
+        for trio in iter_combinations(draw, 3):
+            trio_counter[trio] += 1
+            
+    if not trio_counter:
+        logger.info("Nenhum trio encontrado ou contado.")
+        return pd.DataFrame({'Dezena1': [], 'Dezena2': [], 'Dezena3': [], 'Frequencia': []})
+
+    trios_data = []
+    for trio_tuple, freq in trio_counter.items():
+        trios_data.append({
+            'Dezena1': trio_tuple[0], 
+            'Dezena2': trio_tuple[1], 
+            'Dezena3': trio_tuple[2], 
+            'Frequencia': freq
+        })
+        
+    trios_df = pd.DataFrame(trios_data)
+
+    if trios_df.empty:
+        logger.info("DataFrame de frequência de trios resultante está vazio.")
+    else:
+        logger.info(f"Frequência de trios calculada para {len(trios_df)} trios distintos.")
+        trios_df = trios_df.sort_values(by='Frequencia', ascending=False)
+        
+    return trios_df
+
+# Você pode adicionar calculate_quadra_frequencies, etc., seguindo o mesmo padrão.
