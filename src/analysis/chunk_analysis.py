@@ -1,82 +1,171 @@
 # src/analysis/chunk_analysis.py
-
 import pandas as pd
-import numpy as np
-import sqlite3
-import sys
-from typing import Optional, List, Dict
-from pathlib import Path # Garante import
+from typing import List, Dict, Tuple, Any, Set # Adicionado Set
+import logging # Adicionado
 
-# Importa do config e db_manager
-from src.config import logger, ALL_NUMBERS, DATABASE_PATH
-from src.database_manager import get_chunk_final_stats_table_name, create_chunk_stats_final_table
+# Importar apenas as constantes REALMENTE existentes e necessárias de config.py
+from src.config import ALL_NUMBERS, CHUNK_TYPES_CONFIG
+# logger, DATABASE_PATH, ALL_NUMBERS_SET são removidos da importação de config
 
-# Fallback
-if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
+from src.database_manager import DatabaseManager # Para type hinting
+
+logger = logging.getLogger(__name__) # Logger específico para este módulo
+
+# Se um conjunto de ALL_NUMBERS for frequentemente usado para checagens de 'in',
+# pode ser útil defini-lo aqui para performance, embora para 25 números, a diferença seja mínima.
+ALL_NUMBERS_AS_SET: Set[int] = set(ALL_NUMBERS)
+
+def get_chunk_definitions(total_contests: int, chunk_config_type: str, chunk_config_sizes: List[int]) -> List[Tuple[int, int, str]]:
+    """
+    Gera definições de blocos (chunks) com base no tipo e tamanhos configurados.
+    Esta função é chamada com uma lista contendo um único tamanho de chunk_config_sizes por vez
+    a partir de calculate_chunk_metrics_and_persist.
+
+    Args:
+        total_contests: Número total de concursos disponíveis.
+        chunk_config_type: Tipo de configuração do bloco (ex: 'linear', 'fibonacci').
+        chunk_config_sizes: Lista de tamanhos para o tipo de bloco (espera-se um único tamanho nesta lista).
+
+    Returns:
+        Lista de tuplas, onde cada tupla contém (concurso_inicial, concurso_final, nome_sufixo_bloco).
+    """
+    definitions: List[Tuple[int, int, str]] = []
+    if not chunk_config_sizes:
+        logger.warning(f"Nenhum tamanho configurado para o tipo de bloco: {chunk_config_type}")
+        return definitions
+
+    # chunk_config_sizes é esperado como uma lista com um único item [size]
+    # devido a como é chamado em calculate_chunk_metrics_and_persist
+    for sz_item in chunk_config_sizes:
+        if sz_item <= 0:
+            logger.warning(f"Tamanho de chunk inválido (deve ser > 0): {sz_item} para o tipo {chunk_config_type}. Pulando este tamanho.")
+            continue
+            
+        current_pos = 0
+        while current_pos < total_contests:
+            start_contest = current_pos + 1 # Concursos são 1-based
+            end_contest = min(current_pos + sz_item, total_contests)
+            
+            # Adiciona o chunk apenas se start_contest não ultrapassar end_contest
+            # (embora com current_pos < total_contests e sz_item > 0, start_contest <= end_contest deve ser verdade
+            # a menos que o último chunk seja menor que sz_item e já tenha sido coberto)
+            if start_contest > end_contest and current_pos >= total_contests : # Evita loop infinito se algo der errado
+                 break # Segurança
+
+            # O sufixo é apenas para identificação se necessário, mas não é usado criticamente mais tarde
+            suffix = f"{chunk_config_type}_{sz_item}"
+            definitions.append((start_contest, end_contest, suffix))
+            
+            current_pos = end_contest
+            if current_pos >= total_contests: # Sai se todos os concursos foram cobertos
+                break
+                
+    logger.debug(f"Definições de chunk para tipo='{chunk_config_type}', tamanhos={chunk_config_sizes}: {len(definitions)} blocos gerados.")
+    return definitions
 
 
-def get_chunk_final_stats(interval_size: int, concurso_maximo: Optional[int] = None, db_path: Path = DATABASE_PATH) -> Optional[pd.DataFrame]: # Adiciona db_path
-    """ Lê as estatísticas finais salvas para cada bloco completo. """
-    table_name = get_chunk_final_stats_table_name(interval_size)
-    logger.info(f"Buscando stats finais chunks de {interval_size} em '{table_name}' (até {concurso_maximo or 'fim'})...")
-    # create_chunk_stats_final_table(interval_size, db_path) # Não cria aqui
+def calculate_frequency_in_chunk(df_chunk: pd.DataFrame) -> pd.Series:
+    """
+    Calcula a frequência absoluta de cada dezena em um chunk de dados.
+    As dezenas são indexadas por ALL_NUMBERS.
+    """
+    if df_chunk.empty:
+        # Retorna uma série com todas as dezenas e frequência 0
+        return pd.Series(0, index=pd.Index(ALL_NUMBERS, name="dezena"), name="frequencia_absoluta", dtype='int')
+    
+    # As dezenas estão nas colunas 'bola_1' a 'bola_15'
+    dezena_cols = [f'bola_{i}' for i in range(1, 16)]
+    
+    # Verifica se todas as colunas de bolas esperadas existem no df_chunk
+    missing_ball_cols = [col for col in dezena_cols if col not in df_chunk.columns]
+    if missing_ball_cols:
+        logger.warning(f"Colunas de bolas ausentes no chunk: {missing_ball_cols}. Frequência pode ser imprecisa.")
+        # Continuar com as colunas existentes
+        dezena_cols = [col for col in dezena_cols if col in df_chunk.columns]
+        if not dezena_cols: # Nenhuma coluna de bola encontrada
+            logger.error("Nenhuma coluna de bola encontrada no chunk. Não é possível calcular frequência.")
+            return pd.Series(0, index=pd.Index(ALL_NUMBERS, name="dezena"), name="frequencia_absoluta", dtype='int')
 
-    freq_cols = [f'd{i}_freq' for i in ALL_NUMBERS]
-    rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
-    all_cols = ['concurso_fim'] + freq_cols + rank_cols
-    all_cols_str = ', '.join(f'"{col}"' for col in all_cols)
-    empty_df = pd.DataFrame(columns=all_cols[1:], index=pd.Index([], name='concurso_fim')).astype(int) # Cria DF vazio padrão
-
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
-            if cursor.fetchone() is None: logger.error(f"Tabela '{table_name}' não encontrada."); return None
-
-            sql_query = f"SELECT {all_cols_str} FROM {table_name}"; params = []
-            if concurso_maximo is not None:
-                last_relevant_chunk_end = (concurso_maximo // interval_size) * interval_size
-                if last_relevant_chunk_end >= interval_size : sql_query += " WHERE concurso_fim <= ?"; params.append(last_relevant_chunk_end)
-                else: return empty_df
-
-            sql_query += " ORDER BY concurso_fim ASC;"
-            df_stats = pd.read_sql_query(sql_query, conn, params=params)
-            logger.info(f"{len(df_stats)} registros de stats finais lidos (int={interval_size}).")
-
-            if df_stats.empty: return empty_df
-
-            df_stats.set_index('concurso_fim', inplace=True)
-            for col in df_stats.columns: df_stats[col] = pd.to_numeric(df_stats[col], errors='coerce').fillna(0).astype(int)
-            return df_stats
-
-    except Exception as e: logger.error(f"Erro ao ler stats finais chunk '{table_name}': {e}"); return None
+    all_drawn_numbers_in_chunk = df_chunk[dezena_cols].values.flatten()
+    
+    # Conta frequências e reindexa para garantir todas as dezenas de ALL_NUMBERS
+    frequency_series = pd.Series(all_drawn_numbers_in_chunk).value_counts()
+    frequency_series = frequency_series.reindex(ALL_NUMBERS, fill_value=0)
+    frequency_series.name = "frequencia_absoluta"
+    frequency_series.index.name = "dezena" # Nomeia o índice
+    
+    return frequency_series.astype(int)
 
 
-# --- FUNÇÃO IMPLEMENTADA ---
-def calculate_historical_rank_stats(interval_size: int, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
-    """ Calcula média e std dev do RANK histórico das dezenas nos chunks. """
-    logger.info(f"Calculando stats históricos de rank para chunks de {interval_size}...")
+def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: DatabaseManager):
+    """
+    Calcula métricas de chunk (inicialmente frequência) para todas as configurações
+    e persiste os resultados em tabelas formatadas para análise de evolução.
 
-    df_chunk_stats = get_chunk_final_stats(interval_size, concurso_maximo)
+    Args:
+        all_data_df: DataFrame com todos os concursos. Colunas 'Concurso', 'Data', 'bola_1'...'bola_15'.
+        db_manager: Instância do DatabaseManager para salvar os dados.
+    """
+    logger.info("Iniciando cálculo e persistência de métricas de chunk para evolução.")
+    if 'Concurso' not in all_data_df.columns:
+        logger.error("Coluna 'Concurso' não encontrada no DataFrame principal. Não é possível processar chunks.")
+        return
+        
+    total_contests = all_data_df['Concurso'].max()
+    if pd.isna(total_contests) or total_contests <= 0:
+        logger.error(f"Número total de concursos inválido: {total_contests}. Não é possível processar chunks.")
+        return
 
-    nan_series = pd.Series(np.nan, index=ALL_NUMBERS); default_result_df = pd.DataFrame({ f'avg_rank_chunk{interval_size}': nan_series, f'std_rank_chunk{interval_size}': nan_series }, index=pd.Index(ALL_NUMBERS, name='dezena'))
+    for chunk_type, config in CHUNK_TYPES_CONFIG.items():
+        chunk_sizes = config.get('sizes', [])
+        # Métricas a serem calculadas, por enquanto apenas frequência.
+        # No futuro, pode vir de config.get('metrics', ['frequency'])
+        # metrics_to_calculate = ['frequency'] # Hardcoded por enquanto
 
-    if df_chunk_stats is None: return None
-    if df_chunk_stats.empty: return default_result_df # Retorna NaNs se vazio
+        for size in chunk_sizes:
+            logger.info(f"Processando chunks: tipo='{chunk_type}', tamanho={size}, métrica='frequency'")
+            
+            # Passa size como uma lista de um elemento para get_chunk_definitions
+            chunk_definitions = get_chunk_definitions(total_contests, chunk_type, [size])
 
-    rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS if f'd{i}_rank' in df_chunk_stats.columns]
-    if len(rank_cols) != 25: logger.error(f"Colunas de rank insuficientes p/ int {interval_size}."); return None
-    df_ranks_only = df_chunk_stats[rank_cols]
+            if not chunk_definitions:
+                logger.warning(f"Nenhuma definição de chunk para tipo='{chunk_type}', tamanho={size}. Pulando.")
+                continue
 
-    avg_ranks = df_ranks_only.mean(axis=0, skipna=True)
-    std_ranks = pd.Series(np.nan, index=rank_cols)
-    if len(df_ranks_only) >= 2: std_ranks = df_ranks_only.std(axis=0, skipna=True, ddof=1)
+            all_metrics_for_this_config: List[Dict[str, Any]] = []
+            
+            for idx, (start_contest, end_contest, _) in enumerate(chunk_definitions):
+                mask = (all_data_df['Concurso'] >= start_contest) & (all_data_df['Concurso'] <= end_contest)
+                df_current_chunk = all_data_df[mask]
 
-    stats_data = []
-    for i in ALL_NUMBERS:
-        col_rank_key = f'd{i}_rank'
-        stats_data.append({ 'dezena': i, f'avg_rank_chunk{interval_size}': avg_ranks.get(col_rank_key, np.nan), f'std_rank_chunk{interval_size}': std_ranks.get(col_rank_key, np.nan) })
+                # Mesmo se o chunk estiver vazio (ex: poucos concursos totais e tamanho de chunk grande),
+                # queremos calcular a frequência (que será 0 para todas as dezenas).
+                # calculate_frequency_in_chunk já lida com df_current_chunk vazio.
+                if df_current_chunk.empty:
+                     logger.debug(f"Chunk {chunk_type}_{size} (Concursos {start_contest}-{end_contest}) está vazio. Frequências serão 0.")
+                
+                frequency_series_chunk = calculate_frequency_in_chunk(df_current_chunk)
+                
+                for dezena_val, freq_val in frequency_series_chunk.items():
+                    all_metrics_for_this_config.append({
+                        'chunk_seq_id': idx + 1, 
+                        'chunk_start_contest': start_contest,
+                        'chunk_end_contest': end_contest,
+                        'dezena': int(dezena_val),
+                        'frequencia_absoluta': int(freq_val)
+                    })
 
-    results_df = pd.DataFrame(stats_data).set_index('dezena')
-    logger.info(f"Stats históricos de rank para chunks de {interval_size} calculados.")
-    return results_df
+            if not all_metrics_for_this_config:
+                logger.info(f"Nenhuma métrica calculada para chunks tipo='{chunk_type}', tamanho={size}. Nada a persistir.")
+                continue
+
+            metrics_df = pd.DataFrame(all_metrics_for_this_config)
+            table_name = f"evol_metric_frequency_{chunk_type}_{size}"
+            
+            try:
+                db_manager.save_dataframe_to_db(metrics_df, table_name, if_exists='replace')
+                logger.info(f"Métricas de frequência para chunks tipo='{chunk_type}', tamanho={size} salvas na tabela '{table_name}'. {len(metrics_df)} registros.")
+            except Exception as e:
+                logger.error(f"Erro ao salvar métricas para chunks tipo='{chunk_type}', tamanho={size} na tabela '{table_name}': {e}", exc_info=True)
+
+    logger.info("Cálculo e persistência de métricas de chunk para evolução concluídos.")

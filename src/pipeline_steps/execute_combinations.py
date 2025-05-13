@@ -1,28 +1,38 @@
 # src/pipeline_steps/execute_combinations.py
+import pandas as pd
+import logging # Adicionado
+from src.analysis.combination_analysis import calculate_pair_frequencies # Supondo esta função para pares
+from src.database_manager import DatabaseManager
+# from src.config import logger # Removido
 
-import argparse
-from src.config import logger
-from src.analysis.combination_analysis import calculate_combination_frequency
+logger = logging.getLogger(__name__) # Corrigido
 
-def execute_combination_analysis(args: argparse.Namespace):
-    """ Executa e exibe a análise de combinações (Trios+). """
-    logger.info(f"Executando análises de combinação (Trios+)...")
-    top_n = args.top_n
-    max_c = args.max_concurso
-
-    for size in [3, 4, 5, 6]:
-        combo_name_map = {3:"Trios", 4:"Quartetos", 5:"Quintetos", 6:"Sextetos"}
-        combo_name = combo_name_map.get(size)
-        logger.info(f"Calculando os {top_n} {combo_name} mais frequentes...")
-
-        # Recebe a lista de resultados
-        top_combos_list = calculate_combination_frequency(size, top_n, max_c)
-
-        if top_combos_list:
-            print(f"\n--- Top {top_n} {combo_name} Mais Frequentes ---")
-            for combo, count in top_combos_list:
-                print(f"Comb: ({', '.join(map(str, combo))}) - Freq: {count}")
+def run_pair_combination_analysis(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
+    """
+    Executa a análise de combinações de pares.
+    """
+    try:
+        logger.info("Iniciando análise de combinações de pares.")
+        
+        pair_freq_df = calculate_pair_frequencies(all_data_df)
+        if pair_freq_df is not None and not pair_freq_df.empty:
+            db_manager.save_dataframe_to_db(pair_freq_df, 'frequencia_pares')
+            logger.info("Frequência de pares salva no banco de dados.")
         else:
-            # A função de análise já loga warning
-             logger.info(f"Nenhuma combinação encontrada para {combo_name} ou análise falhou.")
-    logger.info("Análises de combinação (Trios+) concluídas.")
+            logger.warning("Não foi possível calcular ou DataFrame de frequência de pares vazio.")
+            
+        # Se combination_analysis.py também lida com trios, etc., adicione chamadas aqui
+        # Ex:
+        # trio_freq_df = calculate_trio_frequencies(all_data_df)
+        # db_manager.save_dataframe_to_db(trio_freq_df, 'frequencia_trios')
+
+        logger.info("Análise de combinações de pares concluída.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro na análise de combinações de pares: {e}", exc_info=True)
+        return False
+
+# Se este arquivo se chamar execute_pairs.py, o import em __init__.py e a chamada em main.py
+# devem refletir isso. O main.py atual usa "pair-combination-analysis" e chama
+# ps.run_pair_combination_analysis, o que sugere que esta função deve estar em __init__.py.
+# O arquivo execute_pairs.py que você forneceu pode ser este, ou uma parte dele.

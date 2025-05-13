@@ -1,45 +1,29 @@
 # src/pipeline_steps/execute_properties.py
+import pandas as pd
+import logging # Adicionado
+from src.analysis.number_properties_analysis import analyze_number_properties # Supondo esta função principal
+from src.database_manager import DatabaseManager
+# from src.config import logger # Removido
 
-import argparse
-import pandas as pd # Para checar None
-from src.config import logger
-from src.analysis.number_properties_analysis import analyze_number_properties, summarize_properties
-try:
-    from src.visualization.plotter import plot_distribution_bar
-    PLOTTING_ENABLED_STEP = True
-except ImportError:
-    PLOTTING_ENABLED_STEP = False
+logger = logging.getLogger(__name__) # Corrigido
 
-
-def execute_properties_analysis(args: argparse.Namespace, should_plot: bool):
-    """ Executa e exibe a análise de propriedades dos números. """
-    logger.info(f"Executando análise de propriedades...")
-    max_c = args.max_concurso
-    plot_flag = should_plot and PLOTTING_ENABLED_STEP
-
-    # Recebe o DataFrame com detalhes por concurso
-    properties_df = analyze_number_properties(concurso_maximo=max_c)
-
-    if properties_df is not None and not properties_df.empty:
-        # Recebe o dicionário com as sumarizações (value_counts)
-        prop_summaries = summarize_properties(properties_df)
-
-        # Itera sobre os resultados sumarizados e os exibe/plota
-        for key, series in prop_summaries.items():
-            title = key.replace('_', ' ').replace('par impar', 'Pares/Ímpares').replace('moldura miolo', 'Moldura/Miolo').title()
-            print(f"\n--- Frequência {title} ---")
-            if series is not None and not series.empty:
-                print(series.to_string()) # Imprime a sumarização
-                if plot_flag:
-                    # Plota a sumarização
-                    plot_distribution_bar(series, title, f"dist_{key}")
-            else:
-                 logger.warning(f"Sumarização para '{key}' está vazia.")
-
-        # Opcional: Exibir o DataFrame detalhado (pode ser muito grande)
-        # logger.debug("Exibindo detalhes das propriedades (últimos 5)...")
-        # print("\n--- Detalhes das Propriedades (Últimos 5 Concursos) ---")
-        # print(properties_df.tail().to_string(index=False))
-    else:
-         logger.warning("Falha ao analisar as propriedades ou nenhum dado retornado.")
-    logger.info("Análise de propriedades concluída.")
+def run_number_properties_analysis(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
+    """
+    Executa a análise de propriedades numéricas (pares, ímpares, primos, etc.) por concurso.
+    """
+    try:
+        logger.info("Iniciando análise de propriedades numéricas.")
+        
+        properties_by_contest_df = analyze_number_properties(all_data_df) # Esta função deve retornar um DataFrame
+        
+        if properties_by_contest_df is not None and not properties_by_contest_df.empty:
+            db_manager.save_dataframe_to_db(properties_by_contest_df, 'propriedades_numericas_por_concurso')
+            logger.info("Análise de propriedades numéricas por concurso salva no banco de dados.")
+        else:
+            logger.warning("Não foi possível calcular ou DataFrame de propriedades numéricas vazio.")
+            
+        logger.info("Análise de propriedades numéricas concluída.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro na análise de propriedades numéricas: {e}", exc_info=True)
+        return False

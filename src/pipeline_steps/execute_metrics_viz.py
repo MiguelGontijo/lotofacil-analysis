@@ -1,65 +1,51 @@
 # src/pipeline_steps/execute_metrics_viz.py
+import logging # Adicionado
+from pathlib import Path # Adicionado
+from typing import Optional # Adicionado
+from src.database_manager import DatabaseManager
+from src.visualization.plotter import plot_frequency, plot_delay # Supondo estas funções em plotter.py
+from src.config import PLOT_DIR_CONFIG # Usar como fallback
 
-import argparse
-from typing import Dict, Any, Optional
-import pandas as pd
+logger = logging.getLogger(__name__) # Corrigido
 
-from src.config import logger, DEFAULT_GROUP_WINDOWS, DEFAULT_RANK_TREND_LOOKBACK
-from src.visualization.plotter import plot_histogram, plot_group_bar_chart
-
-# Fallbacks se config falhar
-if 'DEFAULT_GROUP_WINDOWS' not in globals(): DEFAULT_GROUP_WINDOWS = [25, 100]
-if 'DEFAULT_RANK_TREND_LOOKBACK' not in globals(): DEFAULT_RANK_TREND_LOOKBACK = 50
-
-def execute_metrics_visualization(analysis_results: Optional[Dict[str, Any]]):
+def run_core_metrics_visualization(
+    db_manager: DatabaseManager,
+    output_dir_from_pipeline: Optional[Path] = None, # Recebe do pipeline
+    **kwargs
+) -> bool:
     """
-    Gera visualizações para métricas chave calculadas pelo agregador.
-
-    Args:
-        analysis_results (Optional[Dict[str, Any]]): O dicionário retornado por
-                                                      get_consolidated_analysis.
+    Executa a visualização das principais métricas (frequência, atraso).
     """
-    if analysis_results is None:
-        logger.error("Resultados da análise não disponíveis para visualização.")
-        return
+    try:
+        logger.info("Iniciando visualização de métricas principais.")
+        
+        output_dir_to_use = output_dir_from_pipeline if output_dir_from_pipeline else PLOT_DIR_CONFIG
+        Path(output_dir_to_use).mkdir(parents=True, exist_ok=True)
 
-    logger.info("Gerando visualizações de métricas chave...")
+        # Plotar Frequência Absoluta
+        df_freq_abs = db_manager.load_dataframe_from_db('frequencia_absoluta')
+        if df_freq_abs is not None and not df_freq_abs.empty:
+            # Supondo que plot_frequency precisa do DataFrame e do diretório de saída
+            # A função plot_frequency em plotter.py já tem output_dir com default PLOT_DIR_CONFIG
+            # por isso, podemos chamar diretamente ou passar o output_dir_to_use se quisermos sobrescrever.
+            plot_frequency(df_freq_abs, metric_type='Absoluta', output_dir=str(output_dir_to_use)) 
+            logger.info("Gráfico de frequência absoluta gerado.")
+        else:
+            logger.warning("Dados de frequência absoluta não encontrados ou vazios. Gráfico não gerado.")
 
-    # 1. Histograma do Desvio Padrão do Atraso
-    delay_std_dev = analysis_results.get('delay_std_dev')
-    if isinstance(delay_std_dev, pd.Series):
-        plot_histogram(delay_std_dev,
-                       title="Distribuição do Desvio Padrão do Atraso Histórico",
-                       xlabel="Desvio Padrão do Atraso (Concursos)",
-                       filename="hist_delay_std_dev")
-    else: logger.warning("Dados 'delay_std_dev' não encontrados ou inválidos para plot.")
+        # Plotar Atraso Atual
+        df_delay_curr = db_manager.load_dataframe_from_db('atraso_atual')
+        if df_delay_curr is not None and not df_delay_curr.empty:
+            # Supondo que plot_delay precisa do DataFrame, tipo de atraso e diretório de saída
+            plot_delay(df_delay_curr, delay_type='Atual', output_dir=str(output_dir_to_use))
+            logger.info("Gráfico de atraso atual gerado.")
+        else:
+            logger.warning("Dados de atraso atual não encontrados ou vazios. Gráfico não gerado.")
+            
+        # Adicionar mais plots conforme necessário (ex: Atraso Máximo, Frequência Relativa)
 
-    # 2. Histograma da Frequência de Fechamento
-    closing_freq = analysis_results.get('closing_freq')
-    if isinstance(closing_freq, pd.Series):
-         plot_histogram(closing_freq,
-                       title="Distribuição da Frequência como Dezena de Fechamento",
-                       xlabel="Nº de Vezes que Fechou Ciclo",
-                       filename="hist_closing_freq")
-    else: logger.warning("Dados 'closing_freq' não encontrados ou inválidos para plot.")
-
-    # 3. Histograma da Tendência de Rank Geral
-    rank_trend = analysis_results.get('rank_trend')
-    if isinstance(rank_trend, pd.Series):
-        plot_histogram(rank_trend,
-                       title=f"Distribuição da Tendência de Rank (Lookback {DEFAULT_RANK_TREND_LOOKBACK})",
-                       xlabel="Variação no Rank (Positivo = Melhorou)",
-                       filename="hist_rank_trend")
-    else: logger.warning("Dados 'rank_trend' não encontrados ou inválidos para plot.")
-
-    # 4. Gráfico de Barras da Frequência Média por Grupo
-    group_stats_df = analysis_results.get('group_freq_stats_df')
-    if isinstance(group_stats_df, pd.DataFrame):
-         # Plota para cada janela padrão de grupo
-         for window in DEFAULT_GROUP_WINDOWS:
-              plot_group_bar_chart(group_stats_df, window,
-                                   title=f"Frequência Média Recente por Grupo (Últimos {window} Concursos)",
-                                   filename=f"bar_group_freq_W{window}")
-    else: logger.warning("Dados 'group_freq_stats_df' não encontrados ou inválidos para plot.")
-
-    logger.info("Visualizações de métricas chave concluídas (verificar pasta 'plots').")
+        logger.info("Visualização de métricas principais concluída.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro na visualização de métricas principais: {e}", exc_info=True)
+        return False

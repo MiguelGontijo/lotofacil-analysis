@@ -1,59 +1,39 @@
 # src/pipeline_steps/execute_frequency.py
+import pandas as pd
+import logging # Adicionado/Confirmado
+from src.analysis.frequency_analysis import calculate_frequency, calculate_relative_frequency
+from src.database_manager import DatabaseManager
+# from src.config import logger # Removido
 
-import argparse
-import pandas as pd # Necessário para checar tipo
+logger = logging.getLogger(__name__) # Corrigido: Logger específico do módulo
 
-from src.config import logger
-from src.analysis.frequency_analysis import (
-    calculate_frequency as calculate_period_frequency,
-    calculate_windowed_frequency,
-    calculate_cumulative_frequency_history
-)
-try:
-    from src.visualization.plotter import plot_frequency_bar
-    PLOTTING_ENABLED_STEP = True
-except ImportError:
-    PLOTTING_ENABLED_STEP = False
-
-def execute_frequency_analysis(args: argparse.Namespace, should_plot: bool):
-    """ Executa e exibe todas as análises de frequência. """
-    logger.info(f"Executando análises de frequência...")
-    max_c = args.max_concurso
-    plot_flag = should_plot and PLOTTING_ENABLED_STEP
-
-    # --- Frequência Geral ---
-    overall_freq_series = calculate_period_frequency(concurso_maximo=max_c)
-    if overall_freq_series is not None:
-        print("\n--- Frequência Geral das Dezenas ---")
-        print(overall_freq_series.to_string())
-        if plot_flag:
-            plot_frequency_bar(overall_freq_series, "Frequência Geral", "freq_geral")
-    else:
-        logger.warning("Não foi possível calcular a frequência geral.")
-
-    # --- Frequência por Janela ---
+def run_frequency_analysis(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
+    """
+    Executa a análise de frequência e salva os resultados no banco de dados.
+    kwargs é incluído para compatibilidade com o orquestrador, caso ele passe argumentos extras.
+    """
     try:
-        window_sizes = [int(w.strip()) for w in args.windows.split(',') if w.strip()]
-    except ValueError:
-        logger.error(f"Formato inválido para --windows: '{args.windows}'.")
-        window_sizes = []
+        logger.info("Iniciando análise de frequência.")
+        # Calcula a frequência absoluta
+        absolute_freq_df = calculate_frequency(all_data_df)
+        if absolute_freq_df is not None and not absolute_freq_df.empty:
+            db_manager.save_dataframe_to_db(absolute_freq_df, 'frequencia_absoluta')
+            logger.info("Frequência absoluta salva no banco de dados.")
 
-    for window in window_sizes:
-        window_freq_series = calculate_windowed_frequency(window_size=window, concurso_maximo=max_c)
-        if window_freq_series is not None:
-            print(f"\n--- Frequência nos Últimos {window} Concursos ---")
-            print(window_freq_series.to_string())
-            # if plot_flag: plot_frequency_bar(window_freq_series, f"Freq. Últimos {window}", f"freq_{window}")
+            # Calcula a frequência relativa
+            # Presume que calculate_relative_frequency precisa do número total de concursos
+            total_contests = len(all_data_df) # Ou outra métrica de total, se aplicável
+            relative_freq_df = calculate_relative_frequency(absolute_freq_df, total_contests) # Ajustar se a assinatura for diferente
+            if relative_freq_df is not None and not relative_freq_df.empty:
+                db_manager.save_dataframe_to_db(relative_freq_df, 'frequencia_relativa')
+                logger.info("Frequência relativa salva no banco de dados.")
+            else:
+                logger.warning("Não foi possível calcular ou DataFrame de frequência relativa vazio.")
         else:
-            logger.warning(f"Não foi possível calcular frequência para janela de {window}.")
-
-    # --- Frequência Acumulada ---
-    cumulative_hist_df = calculate_cumulative_frequency_history(concurso_maximo=max_c)
-    if cumulative_hist_df is not None:
-        print("\n--- Histórico de Frequência Acumulada (Últimos 5 Registros) ---")
-        # Usar to_string para formatar melhor DataFrames grandes no console
-        print(cumulative_hist_df.tail().to_string(index=False))
-    else:
-        logger.warning("Não foi possível calcular a frequência acumulada.")
-
-    logger.info("Análises de frequência concluídas.")
+            logger.warning("Não foi possível calcular ou DataFrame de frequência absoluta vazio.")
+        
+        logger.info("Análise de frequência concluída.") # Removido "com sucesso" para depender do retorno
+        return True # Ou baseado no sucesso das operações
+    except Exception as e:
+        logger.error(f"Erro na análise de frequência: {e}", exc_info=True)
+        return False

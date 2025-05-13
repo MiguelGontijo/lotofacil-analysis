@@ -1,23 +1,28 @@
 # src/pipeline_steps/execute_pairs.py
+import pandas as pd
+import logging # Adicionado
+from src.analysis.combination_analysis import calculate_pair_frequencies # Supondo esta função para pares
+from src.database_manager import DatabaseManager
+# from src.config import logger # Removido
 
-import argparse
-from src.config import logger
-from src.analysis.combination_analysis import calculate_combination_frequency
+logger = logging.getLogger(__name__) # Corrigido
 
-def execute_pair_analysis(args: argparse.Namespace):
-    """ Executa e exibe a análise de pares. """
-    logger.info(f"Executando análise de pares...")
-    top_n = args.top_n
-    max_c = args.max_concurso
-
-    # Recebe a lista de resultados
-    top_pairs_list = calculate_combination_frequency(2, top_n, max_c)
-
-    if top_pairs_list: # Verifica se a lista não é vazia
-        print(f"\n--- Top {top_n} Pares Mais Frequentes ---")
-        for pair, count in top_pairs_list:
-            print(f"Par: ({', '.join(map(str, pair))}) - Frequência: {count}")
-    else:
-         # A função de análise já loga warning se não encontrar dados
-         logger.info("Nenhum par encontrado ou análise falhou.")
-    logger.info("Análise de pares concluída.")
+def run_pair_combination_analysis(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
+    """
+    Executa a análise de combinações de pares.
+    """
+    try:
+        logger.info("Iniciando análise de combinações de pares.")
+        
+        pair_freq_df = calculate_pair_frequencies(all_data_df) # Esta função deve vir de combination_analysis.py
+        if pair_freq_df is not None and not pair_freq_df.empty:
+            db_manager.save_dataframe_to_db(pair_freq_df, 'frequencia_pares')
+            logger.info("Frequência de pares salva no banco de dados.")
+        else:
+            logger.warning("Não foi possível calcular ou DataFrame de frequência de pares vazio.")
+            
+        logger.info("Análise de combinações de pares concluída.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro na análise de combinações de pares: {e}", exc_info=True)
+        return False

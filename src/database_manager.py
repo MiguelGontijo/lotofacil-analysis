@@ -1,169 +1,213 @@
 # src/database_manager.py
-
 import sqlite3
 import pandas as pd
 from pathlib import Path
 import logging
-from typing import List, Optional, Set, Tuple
-import sys
+from typing import List, Optional
 
-# Importa do config
+# Importar as constantes de configuração relevantes do config.py
+# DATABASE_PATH não existe; usaremos DATA_DIR e DB_FILE_NAME para construir o caminho.
 from src.config import (
-    DATABASE_PATH, TABLE_NAME, CYCLES_TABLE_NAME, FREQ_SNAP_TABLE_NAME,
-    CHUNK_STATS_FINAL_PREFIX, # <<< Novo prefixo
-    logger, NEW_BALL_COLUMNS, ALL_NUMBERS
+    DB_FILE_NAME,       # Nome do arquivo do banco de dados (ex: "lotofacil_analysis.db")
+    DATA_DIR            # Diretório onde o arquivo do BD será armazenado (ex: BASE_DIR / "Data")
 )
 
-# Fallback
-if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
+logger = logging.getLogger(__name__)
 
-# --- Funções save_to_db, read_data_from_db, get_draw_numbers ---
-# (Código completo e correto das versões anteriores)
-def save_to_db(df: pd.DataFrame, table_name: str, db_path: Path = DATABASE_PATH, if_exists: str = 'replace') -> bool:
-    logger.info(f"Salvando dados '{table_name}' (if_exists='{if_exists}')...")
-    if df is None or df.empty: logger.warning(f"DataFrame '{table_name}' vazio."); return False
-    try:
-        with sqlite3.connect(db_path) as conn: df.to_sql(name=table_name, con=conn, if_exists=if_exists, index=False)
-        logger.info(f"{len(df)} registros salvos em '{table_name}'."); return True
-    except Exception as e: logger.error(f"Erro salvar '{table_name}': {e}"); return False
+class DatabaseManager:
+    """
+    Gerencia todas as interações com o banco de dados SQLite.
+    """
+    def __init__(self, db_path: Optional[str] = None):
+        """
+        Inicializa o DatabaseManager.
 
-def read_data_from_db(db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAME, columns: Optional[List[str]] = None, concurso_minimo: Optional[int] = None, concurso_maximo: Optional[int] = None) -> Optional[pd.DataFrame]:
-    log_msg = f"Lendo '{table_name}'"; conditions = []; params = []
-    if concurso_minimo is not None: conditions.append("concurso >= ?"); params.append(concurso_minimo); log_msg += f" >= {concurso_minimo}"
-    if concurso_maximo is not None: conditions.append("concurso <= ?"); params.append(concurso_maximo); log_msg += f" <= {concurso_maximo}"
-    logger.info(log_msg)
-    try:
-        with sqlite3.connect(db_path) as conn:
-            select_cols = '*' if columns is None else ', '.join(f'"{col}"' for col in columns); sql_query = f"SELECT {select_cols} FROM {table_name}"
-            if conditions: sql_query += " WHERE " + " AND ".join(conditions)
-            sql_query += " ORDER BY concurso ASC;"
-            df = pd.read_sql_query(sql_query, conn, params=params)
-            if not df.empty: # Reapply types
-                 if 'data_sorteio' in df.columns: df['data_sorteio'] = pd.to_datetime(df['data_sorteio'], errors='coerce')
-                 for col in df.columns:
-                     if col == 'concurso' or col in NEW_BALL_COLUMNS: df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
-            logger.info(f"{len(df)} registros lidos."); return df
-    except Exception as e: logger.error(f"Erro ao ler '{table_name}': {e}"); return None
+        Args:
+            db_path: Caminho completo para o arquivo do banco de dados.
+                     Se None, constrói o caminho a partir de DATA_DIR e DB_FILE_NAME
+                     definidos em src.config.
+        """
+        if db_path:
+            self.db_path = Path(db_path)
+            logger.info(f"DatabaseManager usando db_path fornecido: {self.db_path}")
+        else:
+            # Constrói o caminho do banco de dados usando DATA_DIR e DB_FILE_NAME de config.py
+            if DATA_DIR and DB_FILE_NAME:
+                self.db_path = DATA_DIR / DB_FILE_NAME
+                logger.info(f"Nenhum db_path explícito fornecido. Usando caminho construído do config: {self.db_path}")
+            else:
+                # Fallback crítico se as constantes não estiverem devidamente configuradas em config.py
+                # Isso não deveria acontecer se config.py estiver correto.
+                default_fallback_path = Path("lotofacil_default_critical_error.db")
+                logger.error(
+                    f"DATA_DIR ou DB_FILE_NAME não estão configurados corretamente em src.config.py "
+                    f"e nenhum db_path foi fornecido ao DatabaseManager. "
+                    f"Usando fallback crítico: {default_fallback_path}"
+                )
+                self.db_path = default_fallback_path
+                # Poderia também levantar um ValueError aqui para forçar a correção da configuração:
+                # raise ValueError("Caminho do banco de dados não pôde ser determinado devido à falta de DATA_DIR ou DB_FILE_NAME em config.py.")
 
-def get_draw_numbers(concurso: int, db_path: Path = DATABASE_PATH, table_name: str = TABLE_NAME) -> Optional[Set[int]]:
-    logger.debug(f"Buscando dezenas concurso {concurso}...")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            ball_cols_str = ', '.join(f'"{col}"' for col in NEW_BALL_COLUMNS); sql_query = f'SELECT {ball_cols_str} FROM {table_name} WHERE concurso = ?'
-            result = conn.execute(sql_query, (concurso,)).fetchone()
-            if result: drawn_numbers = {int(num) for num in result if num is not None and pd.notna(num)}; return drawn_numbers if len(drawn_numbers) == 15 else None
-            else: return None
-    except Exception as e: logger.error(f"Erro buscar dezenas {concurso}: {e}"); return None
+        self._ensure_db_directory_exists()
+        logger.info(f"DatabaseManager inicializado. Banco de dados em: {self.db_path}")
 
-# --- Funções de Ciclo ---
-def create_cycles_table(db_path: Path = DATABASE_PATH):
-    try:
-        with sqlite3.connect(db_path) as conn: sql_create = f"""CREATE TABLE IF NOT EXISTS {CYCLES_TABLE_NAME} (numero_ciclo INTEGER PRIMARY KEY, concurso_inicio INTEGER NOT NULL, concurso_fim INTEGER NOT NULL UNIQUE, duracao INTEGER NOT NULL);"""; conn.execute(sql_create); logger.info(f"Tabela '{CYCLES_TABLE_NAME}' ok.")
-    except sqlite3.Error as e: logger.error(f"Erro criar/verificar '{CYCLES_TABLE_NAME}': {e}")
-def get_last_cycle_end(db_path: Path = DATABASE_PATH) -> Optional[int]:
-    create_cycles_table(db_path); cycles_table_name = CYCLES_TABLE_NAME
-    try:
-        with sqlite3.connect(db_path) as conn: result = conn.execute(f"SELECT MAX(concurso_fim) FROM {cycles_table_name}").fetchone(); return int(result[0]) if result and result[0] is not None else None
-    except sqlite3.Error as e: logger.error(f"Erro buscar último fim de ciclo: {e}"); return None
+    def _ensure_db_directory_exists(self):
+        """
+        Garante que o diretório pai do arquivo de banco de dados exista.
+        """
+        try:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Diretório do banco de dados '{self.db_path.parent}' verificado/criado.")
+        except Exception as e:
+            logger.error(f"Erro ao tentar criar o diretório do banco de dados '{self.db_path.parent}': {e}", exc_info=True)
+            # Dependendo da criticidade, pode-se levantar o erro aqui.
 
-# --- Funções para Snapshots de Frequência ---
-def create_freq_snap_table(db_path: Path = DATABASE_PATH):
-    try:
-        with sqlite3.connect(db_path) as conn: col_defs = ', '.join([f'd{i} INTEGER NOT NULL' for i in ALL_NUMBERS]); sql_create = f"""CREATE TABLE IF NOT EXISTS {FREQ_SNAP_TABLE_NAME} (concurso_snap INTEGER PRIMARY KEY, {col_defs});"""; conn.execute(sql_create); logger.info(f"Tabela '{FREQ_SNAP_TABLE_NAME}' ok.")
-    except sqlite3.Error as e: logger.error(f"Erro criar/verificar '{FREQ_SNAP_TABLE_NAME}': {e}")
-def get_last_freq_snapshot_contest(db_path: Path = DATABASE_PATH) -> Optional[int]:
-    create_freq_snap_table(db_path);
-    try:
-        with sqlite3.connect(db_path) as conn: result = conn.execute(f"SELECT MAX(concurso_snap) FROM {FREQ_SNAP_TABLE_NAME}").fetchone(); return int(result[0]) if result and result[0] is not None else None
-    except sqlite3.Error as e: logger.error(f"Erro buscar último snapshot freq: {e}"); return None
-def get_closest_freq_snapshot(concurso: int, db_path: Path = DATABASE_PATH) -> Optional[Tuple[int, pd.Series]]:
-    create_freq_snap_table(db_path); logger.debug(f"Buscando snapshot freq <= {concurso}...")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS]; col_names_str = ', '.join(f'"{col}"' for col in col_names); sql = f"SELECT {col_names_str} FROM {FREQ_SNAP_TABLE_NAME} WHERE concurso_snap <= ? ORDER BY concurso_snap DESC LIMIT 1;"
-            result = conn.execute(sql, (concurso,)).fetchone()
-            if result:
-                snap_concurso = int(result[0]); freq_data = {}
-                for i, count_val in enumerate(result[1:]):
-                    dezena = ALL_NUMBERS[i];
-                    try:
-                        if isinstance(count_val, int): freq_data[dezena] = count_val
-                        elif isinstance(count_val, bytes): freq_data[dezena] = int.from_bytes(count_val, byteorder=sys.byteorder, signed=False);
-                        else: freq_data[dezena] = 0 if count_val is None or pd.isna(count_val) else int(count_val)
-                    except Exception as e: logger.error(f"Erro converter snap d{dezena}, c={snap_concurso}: {e}."); freq_data[dezena] = 0
-                freq_series = pd.Series(freq_data).reindex(ALL_NUMBERS, fill_value=0).astype(int); logger.debug(f"Snapshot encontrado: {snap_concurso}"); return snap_concurso, freq_series
-            else: logger.debug(f"Nenhum snapshot <= {concurso}."); return None
-    except Exception as e: logger.error(f"Erro buscar snapshot freq: {e}"); return None
-def save_freq_snapshot(concurso_snap: int, freq_series: pd.Series, db_path: Path = DATABASE_PATH):
-    create_freq_snap_table(db_path);
-    if freq_series is None or len(freq_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série freq inválida p/ snap {concurso_snap}."); return
-    logger.debug(f"Salvando snapshot freq c={concurso_snap}...")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            col_names = ['concurso_snap'] + [f'd{i}' for i in ALL_NUMBERS]; placeholders = ', '.join(['?'] * (len(ALL_NUMBERS) + 1)); values_ordered = [freq_series.get(i, 0) for i in ALL_NUMBERS]
-            sql = f"INSERT OR REPLACE INTO {FREQ_SNAP_TABLE_NAME} ({', '.join(col_names)}) VALUES ({placeholders});"; values = [concurso_snap] + values_ordered
-            conn.execute(sql, values); conn.commit(); #logger.debug(f"Snapshot {concurso_snap} salvo.")
-    except Exception as e: logger.error(f"Erro salvar snapshot {concurso_snap}: {e}")
+    def get_connection(self) -> sqlite3.Connection:
+        """
+        Retorna uma nova conexão com o banco de dados.
+        O chamador é responsável por fechar a conexão.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            logger.debug(f"Conexão com o banco de dados '{self.db_path}' estabelecida.")
+            return conn
+        except sqlite3.Error as e:
+            logger.error(f"Erro ao conectar ao banco de dados '{self.db_path}': {e}", exc_info=True)
+            raise  # Propaga o erro para que o chamador possa lidar com ele
 
-# --- NOVAS FUNÇÕES PARA TABELA DE STATS FINAIS DE CHUNK ---
-def get_chunk_final_stats_table_name(interval_size: int) -> str:
-    """ Gera o nome da tabela de stats finais de chunk. """
-    return f"{CHUNK_STATS_FINAL_PREFIX}{interval_size}_final"
+    def save_dataframe_to_db(self, df: pd.DataFrame, table_name: str, if_exists: str = 'replace'):
+        """
+        Salva um DataFrame do Pandas em uma tabela no banco de dados SQLite.
 
-def create_chunk_stats_final_table(interval_size: int, db_path: Path = DATABASE_PATH):
-    """ Cria a tabela de stats finais por chunk para um intervalo específico. """
-    table_name = get_chunk_final_stats_table_name(interval_size)
-    try:
-        with sqlite3.connect(db_path) as conn:
-            freq_col_defs = ', '.join([f'd{i}_freq INTEGER' for i in ALL_NUMBERS]) # Permite NULL? Melhor NOT NULL default 0
-            rank_col_defs = ', '.join([f'd{i}_rank INTEGER' for i in ALL_NUMBERS])
-            # Outras colunas podem ser adicionadas aqui depois (ex: avg_delay, std_dev_delay, etc.)
-            sql_create = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                concurso_fim INTEGER PRIMARY KEY,
-                {freq_col_defs},
-                {rank_col_defs}
-            );
-            """
-            conn.execute(sql_create)
-            logger.info(f"Tabela '{table_name}' verificada/criada.")
-    except sqlite3.Error as e:
-        logger.error(f"Erro ao criar/verificar tabela '{table_name}': {e}")
+        Args:
+            df: DataFrame a ser salvo.
+            table_name: Nome da tabela onde o DataFrame será salvo.
+            if_exists: Comportamento se a tabela já existir ('replace', 'append', 'fail').
+                       Padrão é 'replace'.
+        """
+        if df.empty and if_exists == 'replace':
+            logger.warning(f"Tentando salvar um DataFrame vazio na tabela '{table_name}' com if_exists='replace'. "
+                           f"Se a tabela existir, ela será substituída por uma tabela vazia (ou nenhuma tabela, dependendo do driver). "
+                           f"Para evitar isso, não chame save_dataframe_to_db com DataFrames vazios para if_exists='replace'.")
+            # Opcionalmente, pode-se optar por não fazer nada aqui ou apenas dropar a tabela se ela existir.
+            # Por enquanto, vamos permitir que o pandas lide com isso, mas o log é importante.
+        
+        logger.info(f"Salvando DataFrame na tabela '{table_name}' (modo: {if_exists}). DataFrame com {len(df)} linhas.")
+        try:
+            with self.get_connection() as conn:
+                df.to_sql(table_name, conn, if_exists=if_exists, index=False)
+            logger.info(f"DataFrame salvo com sucesso na tabela '{table_name}'.")
+        except sqlite3.Error as e:
+            logger.error(f"Erro SQLite ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Erro inesperado ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
 
-def get_last_contest_in_chunk_stats_final(interval_size: int, db_path: Path = DATABASE_PATH) -> Optional[int]:
-    """ Busca o último concurso_fim registrado na tabela de stats finais de chunk. """
-    table_name = get_chunk_final_stats_table_name(interval_size)
-    create_chunk_stats_final_table(interval_size, db_path) # Garante que exista
-    try:
-        with sqlite3.connect(db_path) as conn:
-            result = conn.execute(f"SELECT MAX(concurso_fim) FROM {table_name}").fetchone()
-            return int(result[0]) if result and result[0] is not None else None
-    except sqlite3.Error as e:
-        logger.error(f"Erro ao buscar último concurso em '{table_name}': {e}")
-        return None
+    def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
+        """
+        Carrega uma tabela do banco de dados SQLite para um DataFrame do Pandas.
 
-def save_chunk_final_stats_row(interval_size: int, concurso_fim: int,
-                               freq_series: pd.Series, rank_series: pd.Series,
-                               db_path: Path = DATABASE_PATH):
-    """ Salva (INSERT OR REPLACE) uma linha na tabela de stats finais de chunk. """
-    table_name = get_chunk_final_stats_table_name(interval_size)
-    create_chunk_stats_final_table(interval_size, db_path)
-    # Validações
-    if freq_series is None or len(freq_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série freq inválida p/ chunk {interval_size}, c={concurso_fim}."); return
-    if rank_series is None or len(rank_series.index.intersection(ALL_NUMBERS)) != 25: logger.error(f"Série rank inválida p/ chunk {interval_size}, c={concurso_fim}."); return
+        Args:
+            table_name: Nome da tabela a ser carregada.
 
-    logger.debug(f"Salvando stats finais chunk {interval_size} para concurso {concurso_fim}...")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            freq_cols = [f'd{i}_freq' for i in ALL_NUMBERS]
-            rank_cols = [f'd{i}_rank' for i in ALL_NUMBERS]
-            col_names = ['concurso_fim'] + freq_cols + rank_cols
-            placeholders = ', '.join(['?'] * len(col_names))
-            # Pega valores na ordem correta 1-25
-            freq_values = [freq_series.get(i, 0) for i in ALL_NUMBERS]
-            rank_values = [rank_series.get(i, 0) for i in ALL_NUMBERS] # Assumindo rank é int
-            sql = f"INSERT OR REPLACE INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders});"
-            values = [concurso_fim] + freq_values + rank_values
-            conn.execute(sql, values); conn.commit()
-    except sqlite3.Error as e: logger.error(f"Erro SQLite ao salvar chunk stats {interval_size}, c={concurso_fim}: {e}")
-    except Exception as e: logger.error(f"Erro inesperado ao salvar chunk stats {interval_size}, c={concurso_fim}: {e}")
+        Returns:
+            DataFrame com os dados da tabela, ou None se a tabela não existir ou ocorrer um erro.
+        """
+        logger.info(f"Carregando dados da tabela '{table_name}'.")
+        if not self.table_exists(table_name):
+            logger.warning(f"Tabela '{table_name}' não encontrada no banco de dados '{self.db_path}'.")
+            return None # Ou retornar um DataFrame vazio: pd.DataFrame()
+        
+        try:
+            with self.get_connection() as conn:
+                df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+            logger.info(f"Dados da tabela '{table_name}' carregados com sucesso. DataFrame com {len(df)} linhas.")
+            return df
+        except sqlite3.Error as e:
+            logger.error(f"Erro SQLite ao carregar dados da tabela '{table_name}': {e}", exc_info=True)
+            return None # Ou retornar um DataFrame vazio
+        except Exception as e:
+            logger.error(f"Erro inesperado ao carregar dados da tabela '{table_name}': {e}", exc_info=True)
+            return None # Ou retornar um DataFrame vazio
+
+    def table_exists(self, table_name: str) -> bool:
+        """
+        Verifica se uma tabela existe no banco de dados.
+
+        Args:
+            table_name: Nome da tabela a ser verificada.
+
+        Returns:
+            True se a tabela existir, False caso contrário.
+        """
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (table_name,))
+                result = cursor.fetchone()
+            return result is not None
+        except sqlite3.Error as e:
+            logger.error(f"Erro SQLite ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
+            return False # Assumir que não existe em caso de erro de consulta
+        except Exception as e:
+            logger.error(f"Erro inesperado ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
+            return False
+
+    def get_table_names(self) -> List[str]:
+        """
+        Retorna uma lista com os nomes de todas as tabelas no banco de dados.
+        """
+        query = "SELECT name FROM sqlite_master WHERE type='table';"
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query)
+                tables = [row[0] for row in cursor.fetchall()]
+            # Filtra tabelas internas do SQLite, se desejado (ex: 'sqlite_sequence')
+            tables = [table for table in tables if not table.startswith('sqlite_')]
+            logger.debug(f"Tabelas encontradas no banco de dados: {tables}")
+            return tables
+        except sqlite3.Error as e:
+            logger.error(f"Erro SQLite ao obter nomes das tabelas: {e}", exc_info=True)
+            return []
+        except Exception as e:
+            logger.error(f"Erro inesperado ao obter nomes das tabelas: {e}", exc_info=True)
+            return []
+
+    def execute_query(self, query: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_all: bool = False):
+        """
+        Executa uma consulta SQL genérica.
+
+        Args:
+            query: A string da consulta SQL.
+            params: Tupla de parâmetros para a consulta (opcional).
+            fetch_one: Se True, retorna o primeiro resultado.
+            fetch_all: Se True, retorna todos os resultados.
+
+        Returns:
+            Resultado da consulta (dependendo de fetch_one/fetch_all) ou None.
+        """
+        logger.debug(f"Executando query: {query} com params: {params}")
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params or ())
+                conn.commit() # Commit para DML (INSERT, UPDATE, DELETE) ou DDL
+                
+                if fetch_one:
+                    return cursor.fetchone()
+                if fetch_all:
+                    return cursor.fetchall()
+                # Para INSERT, UPDATE, DELETE, pode-se retornar cursor.rowcount
+                if cursor.description is None: # Sem resultados para SELECT (ex: INSERT, UPDATE, DELETE)
+                    return cursor.rowcount 
+                return None # Por padrão, se não for fetch_one ou fetch_all
+
+        except sqlite3.Error as e:
+            logger.error(f"Erro SQLite ao executar query '{query}': {e}", exc_info=True)
+            # Não propaga o erro aqui para permitir que o fluxo continue, mas loga.
+            # Dependendo do caso de uso, pode ser melhor propagar (raise).
+            return None 
+        except Exception as e:
+            logger.error(f"Erro inesperado ao executar query '{query}': {e}", exc_info=True)
+            return None
