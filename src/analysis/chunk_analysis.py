@@ -1,8 +1,8 @@
 # src/analysis/chunk_analysis.py
 import pandas as pd
-from typing import List, Dict, Tuple, Any, Set 
+from typing import List, Dict, Tuple, Any, Set
 import logging
-import numpy as np # Para np.nan e cálculos de média
+import numpy as np
 
 from src.config import ALL_NUMBERS, CHUNK_TYPES_CONFIG
 from src.database_manager import DatabaseManager
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 ALL_NUMBERS_AS_SET: Set[int] = set(ALL_NUMBERS)
 
 def get_chunk_definitions(total_contests: int, chunk_config_type: str, chunk_config_sizes: List[int]) -> List[Tuple[int, int, str]]:
+    # ... (código mantido como antes, já é eficiente) ...
     definitions: List[Tuple[int, int, str]] = []
     if not chunk_config_sizes:
         logger.warning(f"Nenhum tamanho configurado para o tipo de bloco: {chunk_config_type}")
@@ -31,7 +32,9 @@ def get_chunk_definitions(total_contests: int, chunk_config_type: str, chunk_con
     logger.debug(f"Definições de chunk para tipo='{chunk_config_type}', tamanhos={chunk_config_sizes}: {len(definitions)} blocos gerados.")
     return definitions
 
+
 def calculate_frequency_in_chunk(df_chunk: pd.DataFrame) -> pd.Series:
+    # ... (código mantido como antes, já é relativamente eficiente) ...
     if df_chunk.empty:
         return pd.Series(0, index=pd.Index(ALL_NUMBERS, name="dezena"), name="frequencia_absoluta", dtype='int')
     dezena_cols = [f'bola_{i}' for i in range(1, 16)]
@@ -45,59 +48,114 @@ def calculate_frequency_in_chunk(df_chunk: pd.DataFrame) -> pd.Series:
     frequency_series.index.name = "dezena"
     return frequency_series.astype(int)
 
-def calculate_mean_delay_in_chunk(df_chunk: pd.DataFrame, chunk_start_contest: int, chunk_end_contest: int) -> pd.Series:
-    """
-    Calcula o atraso médio de cada dezena DENTRO de um chunk específico.
-    O atraso é contado a partir do início do chunk ou da última aparição dentro do chunk.
-    """
-    mean_delays_in_chunk = pd.Series(np.nan, index=pd.Index(ALL_NUMBERS, name="dezena"), name="atraso_medio_no_bloco", dtype='float')
+# --- Funções de Atraso Otimizadas ---
 
+def get_draw_matrix_for_chunk(df_chunk: pd.DataFrame, chunk_start_contest: int, chunk_end_contest: int) -> pd.DataFrame:
+    """
+    Cria uma matriz de presença (1/0) para dezenas em concursos de um chunk.
+    Linhas são concursos, colunas são dezenas. Preserva a ordem original dos concursos no chunk.
+    """
+    chunk_duration = chunk_end_contest - chunk_start_contest + 1
     if df_chunk.empty:
-        # Se o chunk está vazio, todas as dezenas têm um "atraso" igual ao tamanho do chunk (ou NaN se preferir)
-        # Para consistência com "nunca saiu no chunk", vamos usar o tamanho do chunk.
-        chunk_duration = chunk_end_contest - chunk_start_contest + 1
-        mean_delays_in_chunk = mean_delays_in_chunk.fillna(float(chunk_duration))
-        return mean_delays_in_chunk
+        # Retorna uma matriz de zeros com todos os concursos do chunk se o df_chunk for vazio
+        # Isso pode não ser o ideal se não houver concursos.
+        # Se df_chunk é vazio porque não há concursos nesse range, está ok.
+        # Se é porque o slice resultou em vazio, mas os concursos existem, então 0 é correto.
+        # Para simplificar, se vazio, assumimos que nada ocorreu.
+        logger.debug(f"Chunk C{chunk_start_contest}-C{chunk_end_contest} vazio para get_draw_matrix_for_chunk.")
+        return pd.DataFrame(0, index=pd.RangeIndex(start=chunk_start_contest, stop=chunk_end_contest + 1, name='Concurso'), columns=ALL_NUMBERS)
+
 
     dezena_cols = [f'bola_{i}' for i in range(1, 16)]
     actual_dezena_cols = [col for col in dezena_cols if col in df_chunk.columns]
-    if not actual_dezena_cols:
-        chunk_duration = chunk_end_contest - chunk_start_contest + 1
-        mean_delays_in_chunk = mean_delays_in_chunk.fillna(float(chunk_duration))
-        return mean_delays_in_chunk
 
-    # Ordenar os concursos dentro do chunk para processamento sequencial de atraso
-    df_chunk_sorted = df_chunk.sort_values(by='Concurso')
+    if not actual_dezena_cols: # Sem colunas de bola, não podemos determinar presença
+        logger.warning(f"Nenhuma coluna de bola em df_chunk para C{chunk_start_contest}-C{chunk_end_contest}.")
+        return pd.DataFrame(0, index=pd.RangeIndex(start=chunk_start_contest, stop=chunk_end_contest + 1, name='Concurso'), columns=ALL_NUMBERS)
 
-    for dezena_val in ALL_NUMBERS:
-        gaps_for_dezena: List[int] = []
-        last_occurrence_contest = chunk_start_contest - 1 # Início virtual antes do chunk
+    # Cria um MultiIndex para cada dezena em cada concurso
+    melted_df = df_chunk.melt(id_vars=['Concurso'], value_vars=actual_dezena_cols, value_name='Dezena')
+    melted_df.dropna(subset=['Dezena'], inplace=True) # Remove NaNs se alguma bola não foi preenchida
+    melted_df['Dezena'] = melted_df['Dezena'].astype(int)
+    melted_df['presente'] = 1
+    
+    # Pivot para criar a matriz de presença
+    # Usa todos os concursos no range do chunk, mesmo que não haja dados para eles (preenche com 0)
+    all_contests_in_chunk_range = pd.Index(range(chunk_start_contest, chunk_end_contest + 1), name='Concurso')
+    
+    try:
+        draw_matrix = melted_df.pivot_table(index='Concurso', columns='Dezena', values='presente', fill_value=0)
+        # Reindex para garantir todas as dezenas e todos os concursos no range do chunk
+        draw_matrix = draw_matrix.reindex(index=all_contests_in_chunk_range, columns=ALL_NUMBERS, fill_value=0)
+    except Exception as e:
+        logger.error(f"Erro ao pivotar dados para draw_matrix no chunk C{chunk_start_contest}-C{chunk_end_contest}: {e}")
+        return pd.DataFrame(0, index=all_contests_in_chunk_range, columns=ALL_NUMBERS) # Fallback
 
-        for index, row in df_chunk_sorted.iterrows():
-            current_contest_in_chunk = int(row['Concurso'])
-            drawn_numbers_in_contest = set(int(num) for num in row[actual_dezena_cols].dropna().values)
+    return draw_matrix.astype(int)
 
-            if dezena_val in drawn_numbers_in_contest:
-                gap = current_contest_in_chunk - last_occurrence_contest - 1
-                gaps_for_dezena.append(gap)
-                last_occurrence_contest = current_contest_in_chunk
+
+def calculate_delays_for_matrix(draw_matrix: pd.DataFrame, chunk_start_contest: int, chunk_end_contest: int) -> Dict[str, pd.Series]:
+    """
+    Calcula Atraso Final, Atraso Médio e Atraso Máximo para cada dezena
+    a partir de uma matriz de presença (concursos x dezenas).
+    """
+    chunk_duration = chunk_end_contest - chunk_start_contest + 1
+    results = {
+        "final": pd.Series(chunk_duration, index=ALL_NUMBERS, dtype='int'),
+        "mean": pd.Series(float(chunk_duration), index=ALL_NUMBERS, dtype='float'), # Default se nunca saiu
+        "max": pd.Series(chunk_duration, index=ALL_NUMBERS, dtype='int')
+    }
+
+    if draw_matrix.empty:
+        logger.debug(f"Matriz de sorteios vazia para C{chunk_start_contest}-C{chunk_end_contest}. Atrasos serão duração do chunk.")
+        return results
+
+    for dezena in ALL_NUMBERS: # Itera sobre as dezenas (colunas da matriz)
+        if dezena not in draw_matrix.columns: # Segurança, embora draw_matrix deva ter todas
+            logger.warning(f"Dezena {dezena} não encontrada na draw_matrix. Usando defaults de atraso.")
+            continue
+
+        col_dezena = draw_matrix[dezena] # Série de 0s e 1s para a dezena, indexada por Concurso
         
-        # Adiciona o gap final (da última ocorrência até o final do chunk)
-        final_gap = chunk_end_contest - last_occurrence_contest
-        gaps_for_dezena.append(final_gap)
+        # Encontra os índices (números dos concursos) onde a dezena apareceu
+        occurrence_contests = col_dezena[col_dezena == 1].index.to_list()
 
-        if gaps_for_dezena:
-            mean_delays_in_chunk.loc[dezena_val] = np.mean(gaps_for_dezena)
-        else: # Dezena não apareceu no chunk (improvável se gaps_for_dezena sempre tem final_gap)
-              # Se nunca apareceu, last_occurrence_contest = chunk_start_contest - 1
-              # final_gap = chunk_end_contest - (chunk_start_contest - 1) = chunk_duration
-              # gaps_for_dezena seria [chunk_duration], então a média é chunk_duration.
-            mean_delays_in_chunk.loc[dezena_val] = float(chunk_end_contest - chunk_start_contest + 1)
+        if not occurrence_contests: # Dezena não apareceu no chunk
+            # Atraso final, médio e máximo são a duração do chunk
+            results["final"].loc[dezena] = chunk_duration
+            results["mean"].loc[dezena] = float(chunk_duration)
+            results["max"].loc[dezena] = chunk_duration
+            continue
+
+        # Atraso Final no Bloco
+        results["final"].loc[dezena] = chunk_end_contest - occurrence_contests[-1]
+
+        # Cálculo de Gaps para Atraso Médio e Máximo
+        gaps = []
+        # Gap inicial: da (partida_chunk - 1) até a primeira ocorrência
+        gaps.append(occurrence_contests[0] - (chunk_start_contest -1) - 1)
+        # Gaps entre ocorrências
+        for i in range(len(occurrence_contests) - 1):
+            gaps.append(occurrence_contests[i+1] - occurrence_contests[i] - 1)
+        # Gap final: da última ocorrência até o final do chunk
+        gaps.append(chunk_end_contest - occurrence_contests[-1])
+        
+        if gaps:
+            results["mean"].loc[dezena] = np.mean(gaps)
+            results["max"].loc[dezena] = max(gaps)
+        else: # Não deveria acontecer se occurrence_contests não for vazio
+            results["mean"].loc[dezena] = float(chunk_duration)
+            results["max"].loc[dezena] = chunk_duration
             
-    return mean_delays_in_chunk
+    results["mean"].name = "atraso_medio_no_bloco"
+    results["max"].name = "atraso_maximo_no_bloco"
+    results["final"].name = "atraso_final_no_bloco"
+    
+    return results
+
 
 def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: DatabaseManager):
-    logger.info("Iniciando cálculo e persistência de métricas de chunk (Frequência e Atraso Médio).") # Log Atualizado
+    logger.info("Iniciando cálculo de métricas de chunk (Frequência e Atrasos Otimizados).")
     if 'Concurso' not in all_data_df.columns:
         logger.error("Coluna 'Concurso' não encontrada. Não é possível processar chunks.")
         return
@@ -110,59 +168,69 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: D
     for chunk_type, config in CHUNK_TYPES_CONFIG.items():
         chunk_sizes = config.get('sizes', [])
         for size in chunk_sizes:
-            logger.info(f"Processando chunks: tipo='{chunk_type}', tamanho={size} para Frequência e Atraso Médio.")
+            logger.info(f"Processando chunks: tipo='{chunk_type}', tamanho={size} para todas as métricas.")
             chunk_definitions = get_chunk_definitions(total_contests, chunk_type, [size])
             if not chunk_definitions:
                 logger.warning(f"Nenhuma definição de chunk para tipo='{chunk_type}', tamanho={size}. Pulando.")
                 continue
 
-            all_frequency_metrics: List[Dict[str, Any]] = []
-            all_mean_delay_metrics: List[Dict[str, Any]] = []
+            # Listas para armazenar os dados de todas as métricas antes de converter para DataFrame
+            all_metrics_data: List[Dict[str, Any]] = []
             
             for idx, (start_contest, end_contest, _) in enumerate(chunk_definitions):
                 mask = (all_data_df['Concurso'] >= start_contest) & (all_data_df['Concurso'] <= end_contest)
                 df_current_chunk = all_data_df[mask]
 
-                # Calcular Frequência
-                frequency_series_chunk = calculate_frequency_in_chunk(df_current_chunk)
-                for dezena_val, freq_val in frequency_series_chunk.items():
-                    all_frequency_metrics.append({
+                # Frequência
+                frequency_series = calculate_frequency_in_chunk(df_current_chunk)
+                
+                # Atrasos (usando a matriz de presença otimizada)
+                draw_matrix_chunk = get_draw_matrix_for_chunk(df_current_chunk, start_contest, end_contest)
+                delay_metrics_dict = calculate_delays_for_matrix(draw_matrix_chunk, start_contest, end_contest)
+                
+                mean_delay_series = delay_metrics_dict["mean"]
+                max_delay_series = delay_metrics_dict["max"]
+                final_delay_series = delay_metrics_dict["final"]
+
+                for dezena_val in ALL_NUMBERS:
+                    all_metrics_data.append({
                         'chunk_seq_id': idx + 1, 
                         'chunk_start_contest': start_contest,
                         'chunk_end_contest': end_contest,
                         'dezena': int(dezena_val),
-                        'frequencia_absoluta': int(freq_val)
-                    })
-                
-                # Calcular Atraso Médio no Bloco
-                mean_delay_series_chunk = calculate_mean_delay_in_chunk(df_current_chunk, start_contest, end_contest)
-                for dezena_val, delay_val in mean_delay_series_chunk.items():
-                    all_mean_delay_metrics.append({
-                        'chunk_seq_id': idx + 1,
-                        'chunk_start_contest': start_contest,
-                        'chunk_end_contest': end_contest,
-                        'dezena': int(dezena_val),
-                        'atraso_medio_no_bloco': float(delay_val) if pd.notna(delay_val) else None # Garante float ou None
+                        'frequencia_absoluta': int(frequency_series.get(dezena_val, 0)),
+                        'atraso_medio_no_bloco': float(mean_delay_series.get(dezena_val, np.nan)) if pd.notna(mean_delay_series.get(dezena_val, np.nan)) else None,
+                        'atraso_maximo_no_bloco': int(max_delay_series.get(dezena_val, 0)),
+                        'atraso_final_no_bloco': int(final_delay_series.get(dezena_val, 0))
                     })
 
-            # Salvar métricas de frequência
-            if all_frequency_metrics:
-                freq_metrics_df = pd.DataFrame(all_frequency_metrics)
-                freq_table_name = f"evol_metric_frequency_{chunk_type}_{size}"
+            if not all_metrics_data:
+                logger.warning(f"Nenhuma métrica de chunk calculada para {chunk_type}_{size}.")
+                continue
+
+            # Criar um DataFrame único e depois separar por métrica para salvar
+            metrics_df_long = pd.DataFrame(all_metrics_data)
+
+            metric_columns_to_save = {
+                "frequency": "frequencia_absoluta",
+                "atraso_medio_bloco": "atraso_medio_no_bloco",
+                "atraso_maximo_bloco": "atraso_maximo_no_bloco",
+                "atraso_final_bloco": "atraso_final_no_bloco"
+            }
+            base_cols = ['chunk_seq_id', 'chunk_start_contest', 'chunk_end_contest', 'dezena']
+
+            for metric_key, value_col_name in metric_columns_to_save.items():
+                df_to_save = metrics_df_long[base_cols + [value_col_name]].copy()
+                table_name = f"evol_metric_{metric_key}_{chunk_type}_{size}"
                 try:
-                    db_manager.save_dataframe_to_db(freq_metrics_df, freq_table_name, if_exists='replace')
-                    logger.info(f"Métricas de frequência para '{chunk_type}_{size}' salvas em '{freq_table_name}'. {len(freq_metrics_df)} registros.")
+                    if df_to_save[value_col_name].isnull().all() and value_col_name == "atraso_medio_no_bloco":
+                        logger.info(f"Coluna '{value_col_name}' contém apenas NaNs para '{table_name}'. Salvando como está.")
+                    elif df_to_save[value_col_name].isnull().any() and value_col_name == "atraso_medio_no_bloco":
+                         logger.debug(f"Coluna '{value_col_name}' para '{table_name}' contém alguns NaNs.")
+
+                    db_manager.save_dataframe_to_db(df_to_save, table_name, if_exists='replace')
+                    logger.info(f"Métrica '{metric_key}' para '{chunk_type}_{size}' salva em '{table_name}'. {len(df_to_save)} registros.")
                 except Exception as e:
-                    logger.error(f"Erro ao salvar frequência para '{chunk_type}_{size}': {e}", exc_info=True)
+                    logger.error(f"Erro ao salvar '{metric_key}' para '{chunk_type}_{size}' em '{table_name}': {e}", exc_info=True)
             
-            # Salvar métricas de atraso médio no bloco
-            if all_mean_delay_metrics:
-                delay_metrics_df = pd.DataFrame(all_mean_delay_metrics)
-                delay_table_name = f"evol_metric_atraso_medio_bloco_{chunk_type}_{size}" # Novo nome de tabela
-                try:
-                    db_manager.save_dataframe_to_db(delay_metrics_df, delay_table_name, if_exists='replace')
-                    logger.info(f"Métricas de atraso médio no bloco para '{chunk_type}_{size}' salvas em '{delay_table_name}'. {len(delay_metrics_df)} registros.")
-                except Exception as e:
-                    logger.error(f"Erro ao salvar atraso médio no bloco para '{chunk_type}_{size}': {e}", exc_info=True)
-
-    logger.info("Cálculo e persistência de métricas de chunk (Frequência e Atraso Médio) concluídos.")
+    logger.info("Cálculo e persistência de métricas de chunk (otimizado) concluídos.")
