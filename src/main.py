@@ -2,26 +2,20 @@
 import logging
 import pandas as pd
 from pathlib import Path
-import argparse # Importar argparse
-from typing import List, Optional # Para type hints
+import argparse
+from typing import List, Optional
 
-# Importar constantes do config.py com os nomes corretos
 from src.config import (
-    DATA_DIR,
-    LOG_DIR_CONFIG,
-    PLOT_DIR_CONFIG,
-    RAW_DATA_FILE_NAME,
-    CLEANED_DATA_FILE_NAME,
-    DB_FILE_NAME
+    DATA_DIR, LOG_DIR_CONFIG, PLOT_DIR_CONFIG,
+    RAW_DATA_FILE_NAME, CLEANED_DATA_FILE_NAME, DB_FILE_NAME
 )
 from src.data_loader import load_and_clean_data, load_cleaned_data
 from src.database_manager import DatabaseManager
 from src.orchestrator import Orchestrator
-import src.pipeline_steps as ps # Importa o módulo todo
+import src.pipeline_steps as ps
 
-# Configuração básica de logging usando as constantes corrigidas
 LOG_DIR_CONFIG.mkdir(parents=True, exist_ok=True)
-PLOT_DIR_CONFIG.mkdir(parents=True, exist_ok=True) # Garantir que PLOT_DIR_CONFIG também exista
+PLOT_DIR_CONFIG.mkdir(parents=True, exist_ok=True)
 log_file_path = LOG_DIR_CONFIG / "lotofacil_analysis.log"
 
 current_handlers = logging.root.handlers[:]
@@ -38,17 +32,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Definição do pipeline de análise com "slugs" para nomes
 ANALYSIS_PIPELINE = [
     {"name": "frequency-analysis", "func": ps.run_frequency_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "delay-analysis", "func": ps.run_delay_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "number-properties-analysis", "func": ps.run_number_properties_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
     {"name": "pair-combination-analysis", "func": ps.run_pair_combination_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "cycle-identification-stats", "func": ps.run_cycle_identification_and_stats, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "rank-trend-analysis", "func": ps.run_rank_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
+    {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
+    {
+        "name": "rank-trend-analysis", # Slug
+        "func": ps.run_rank_trend_analysis_step, # <<< MODIFICADO para a função real
+        "args": ["db_manager"], # A função espera db_manager
+        "kwargs": {}
+    },
     {
         "name": "chunk-evol-analysis",
         "func": ps.run_chunk_evolution_analysis,
@@ -59,13 +57,13 @@ ANALYSIS_PIPELINE = [
         "name": "chunk-evol-viz",
         "func": ps.run_chunk_evolution_visualization,
         "args": ["db_manager"],
-        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG} # Passa o diretório de plotagem
+        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}
     },
     {
         "name": "core-metrics-viz",
         "func": ps.run_core_metrics_visualization,
         "args": ["db_manager"],
-        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG} # Passa o diretório de plotagem
+        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}
     },
 ]
 
@@ -106,36 +104,28 @@ def run_orchestrator_process(
     pipeline_to_run = ANALYSIS_PIPELINE
     if selected_analyses:
         logger.info(f"Executando análises selecionadas: {selected_analyses}")
-        
         temp_pipeline = [step for step in ANALYSIS_PIPELINE if step["name"] in selected_analyses]
-        
         if temp_pipeline:
             name_to_step = {step["name"]: step for step in temp_pipeline}
             ordered_pipeline = []
-            for name in selected_analyses: # Mantém a ordem da linha de comando
+            for name in selected_analyses:
                 if name in name_to_step:
                     ordered_pipeline.append(name_to_step[name])
             pipeline_to_run = ordered_pipeline
         else:
-             pipeline_to_run = temp_pipeline # Lista vazia
-
+             pipeline_to_run = temp_pipeline
         if not pipeline_to_run:
-            logger.warning(f"Nenhuma das análises selecionadas ({selected_analyses}) foi encontrada no pipeline principal. Nenhuma etapa será executada.")
+            logger.warning(f"Nenhuma das análises selecionadas ({selected_analyses}) foi encontrada. Nenhuma etapa será executada.")
         else:
             logger.info(f"Etapas a serem executadas nesta ordem: {[step['name'] for step in pipeline_to_run]}")
 
     orchestrator = Orchestrator(pipeline=pipeline_to_run, db_manager=db_manager)
-    
-    # Adiciona contextos que podem ser usados pelas etapas do pipeline
     orchestrator.set_shared_context("all_data_df", all_data_df)
     orchestrator.set_shared_context("db_manager", db_manager)
-    # Adicionando PLOT_DIR_CONFIG ao contexto para que as etapas possam usá-lo se precisarem diretamente,
-    # embora seja preferível passar via kwargs da definição do pipeline.
     orchestrator.set_shared_context("plot_dir_context", PLOT_DIR_CONFIG)
 
-
     if not pipeline_to_run:
-        logger.info("Pipeline vazio devido à seleção de análises. Encerrando processo de orquestração.")
+        logger.info("Pipeline vazio. Encerrando processo de orquestração.")
         return
 
     logger.info("Executando o pipeline de análise...")

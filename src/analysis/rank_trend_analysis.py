@@ -1,68 +1,126 @@
 # src/analysis/rank_trend_analysis.py
-
 import pandas as pd
-from typing import Optional
+from typing import List, Dict, Tuple, Any # Mantido por hábito, pode não ser usado diretamente aqui
+import logging
 
-# Importa do config e frequency_analysis
-from src.config import logger, ALL_NUMBERS
-from src.analysis.frequency_analysis import get_cumulative_frequency
+# Importar constantes necessárias e existentes de config.py
+from src.config import CHUNK_TYPES_CONFIG, ALL_NUMBERS # Usaremos CHUNK_TYPES_CONFIG para saber quais tabelas de frequência ler
+from src.database_manager import DatabaseManager # Para interagir com o banco de dados
 
-# Fallback
-if 'ALL_NUMBERS' not in globals(): ALL_NUMBERS = list(range(1, 26))
+logger = logging.getLogger(__name__) # Logger específico para este módulo
 
-DEFAULT_RANK_TREND_LOOKBACK = 50 # Período padrão para olhar para trás
-
-def calculate_overall_rank_trend(concurso_maximo: int,
-                                 lookback: int = DEFAULT_RANK_TREND_LOOKBACK
-                                 ) -> Optional[pd.Series]:
+def calculate_and_persist_rank_per_chunk(db_manager: DatabaseManager):
     """
-    Calcula a variação no rank da frequência geral acumulada entre
-    o concurso_maximo e (concurso_maximo - lookback).
-
-    Rank 1 = Mais frequente.
-    Trend = Rank Anterior - Rank Atual. (Positivo = Melhorou o Rank)
+    Lê as tabelas de frequência por chunk (evol_metric_frequency_...),
+    calcula o ranking das dezenas dentro de cada chunk baseado na frequência,
+    e salva os resultados em novas tabelas (evol_rank_frequency_bloco_...).
 
     Args:
-        concurso_maximo (int): O concurso final para análise.
-        lookback (int): Quantos concursos olhar para trás para comparar o rank.
-
-    Returns:
-        Optional[pd.Series]: Series com a variação de rank para cada dezena,
-                             ou None se não houver dados suficientes.
+        db_manager: Instância do DatabaseManager para ler e salvar dados.
     """
-    logger.info(f"Calculando tendência de rank geral (lookback={lookback}) até {concurso_maximo}...")
+    logger.info("Iniciando cálculo e persistência de ranking de frequência por chunk.")
 
-    concurso_anterior = concurso_maximo - lookback
+    for chunk_type, config in CHUNK_TYPES_CONFIG.items():
+        chunk_sizes = config.get('sizes', [])
+        
+        for size in chunk_sizes:
+            freq_table_name = f"evol_metric_frequency_{chunk_type}_{size}"
+            rank_table_name = f"evol_rank_frequency_bloco_{chunk_type}_{size}" # Novo nome de tabela para os ranks
+            
+            logger.info(f"Processando ranking para chunks: tipo='{chunk_type}', tamanho={size}")
+            logger.debug(f"Lendo da tabela de frequência: '{freq_table_name}', Salvando ranking em: '{rank_table_name}'")
 
-    # Verifica se temos dados suficientes para os dois pontos
-    # Considera que precisamos de pelo menos 1 concurso para ter frequência
-    if concurso_maximo < 1 or concurso_anterior < 1:
-        logger.warning(f"Não há dados suficientes para calcular tendência de rank com lookback {lookback} até {concurso_maximo}.")
-        # Retorna uma série de zeros ou NaNs? Zeros indica sem mudança.
-        return pd.Series(0, index=ALL_NUMBERS, name=f'rank_trend_{lookback}').astype(int)
+            if not db_manager.table_exists(freq_table_name):
+                logger.warning(f"Tabela de frequência '{freq_table_name}' não encontrada. Pulando cálculo de ranking para esta configuração.")
+                continue
 
-    # Busca as frequências acumuladas nos dois pontos (usando snapshots otimizados)
-    freq_atual = get_cumulative_frequency(concurso_maximo)
-    freq_anterior = get_cumulative_frequency(concurso_anterior)
+            df_freq_chunk = db_manager.load_dataframe_from_db(freq_table_name)
 
-    # Verifica se conseguiu buscar as frequências
-    if freq_atual is None:
-        logger.error(f"Falha ao obter frequência acumulada para {concurso_maximo}.")
-        return None
-    if freq_anterior is None:
-        logger.warning(f"Falha ao obter frequência acumulada para {concurso_anterior}. Não é possível calcular tendência de rank.")
-        # Retorna zeros indicando sem dados para calcular a tendência
-        return pd.Series(0, index=ALL_NUMBERS, name=f'rank_trend_{lookback}').astype(int)
+            if df_freq_chunk is None or df_freq_chunk.empty:
+                logger.warning(f"DataFrame de frequência carregado de '{freq_table_name}' está vazio. Pulando cálculo de ranking.")
+                continue
+            
+            # Colunas esperadas em df_freq_chunk:
+            # chunk_seq_id, chunk_start_contest, chunk_end_contest, dezena, frequencia_absoluta
+            required_cols = ['chunk_seq_id', 'dezena', 'frequencia_absoluta', 'chunk_start_contest', 'chunk_end_contest']
+            if not all(col in df_freq_chunk.columns for col in required_cols):
+                logger.error(f"Tabela '{freq_table_name}' não contém todas as colunas esperadas ({required_cols}). Colunas presentes: {df_freq_chunk.columns}. Pulando.")
+                continue
 
-    # Calcula os ranks (maior frequência = rank 1)
-    # method='min' para lidar com empates (menor rank no empate)
-    rank_atual = freq_atual.rank(method='min', ascending=False).astype(int)
-    rank_anterior = freq_anterior.rank(method='min', ascending=False).astype(int)
+            try:
+                # Adiciona a coluna de rank ao DataFrame original para manter as outras informações
+                # method='dense': ranks iguais para valores iguais, sem pular o próximo rank (ex: 1, 2, 2, 3).
+                # ascending=False: maior frequência = menor rank (rank 1 é o melhor).
+                df_freq_chunk['rank_no_bloco'] = df_freq_chunk.groupby('chunk_seq_id')['frequencia_absoluta'] \
+                                                              .rank(method='dense', ascending=False).astype(int)
+            except Exception as e:
+                logger.error(f"Erro ao calcular o rank para a tabela '{freq_table_name}': {e}", exc_info=True)
+                continue # Pula para a próxima configuração de chunk/size
+                
+            # Prepara o DataFrame para salvar, renomeando a coluna de frequência para clareza
+            df_to_save = df_freq_chunk.rename(columns={'frequencia_absoluta': 'frequencia_no_bloco'})
+            
+            # Define a ordem desejada das colunas para a tabela de rank
+            # Inclui todas as colunas originais da tabela de frequência mais a nova coluna de rank
+            cols_order = ['chunk_seq_id', 'chunk_start_contest', 'chunk_end_contest', 
+                          'dezena', 'frequencia_no_bloco', 'rank_no_bloco']
+            
+            # Garante que todas as colunas na ordem existam, preenchendo com None se alguma estiver faltando (improvável)
+            for col in cols_order:
+                if col not in df_to_save.columns:
+                    df_to_save[col] = None 
+            df_to_save = df_to_save[cols_order] # Reordena/seleciona as colunas
 
-    # Calcula a diferença (Rank Anterior - Rank Atual)
-    # Se positivo, o rank melhorou (diminuiu). Se negativo, piorou (aumentou).
-    rank_trend = (rank_anterior - rank_atual).fillna(0).astype(int) # Preenche NaN com 0
-    rank_trend.name = f'rank_trend_{lookback}'
+            try:
+                db_manager.save_dataframe_to_db(df_to_save, rank_table_name, if_exists='replace')
+                logger.info(f"Ranking de frequência por chunk salvo na tabela '{rank_table_name}'. {len(df_to_save)} registros.")
+            except Exception as e:
+                logger.error(f"Erro ao salvar dados de ranking na tabela '{rank_table_name}': {e}", exc_info=True)
 
-    logger.info(f"Cálculo de tendência de rank geral (lookback={lookback}) concluído.")
-    return rank_trend
+    logger.info("Cálculo e persistência de ranking de frequência por chunk concluídos.")
+
+
+def calculate_and_persist_general_rank(db_manager: DatabaseManager):
+    """
+    Calcula o ranking geral das dezenas baseado na frequência absoluta total
+    (da tabela 'frequencia_absoluta') e salva em uma nova tabela.
+    """
+    logger.info("Iniciando cálculo e persistência de ranking geral de dezenas por frequência.")
+    freq_abs_table_name = "frequencia_absoluta" 
+
+    if not db_manager.table_exists(freq_abs_table_name):
+        logger.warning(f"Tabela '{freq_abs_table_name}' não encontrada. Não é possível calcular rank geral.")
+        return
+
+    df_freq_abs = db_manager.load_dataframe_from_db(freq_abs_table_name)
+
+    if df_freq_abs is None or df_freq_abs.empty:
+        logger.warning(f"DataFrame da tabela '{freq_abs_table_name}' está vazio. Não é possível calcular rank geral.")
+        return
+    
+    # Tenta identificar as colunas de dezena e frequência de forma flexível
+    dezena_col_name = next((col for col in ['Dezena', 'dezena'] if col in df_freq_abs.columns), None)
+    freq_col_name = next((col for col in ['Frequencia Absoluta', 'frequencia_absoluta'] if col in df_freq_abs.columns), None)
+
+    if not dezena_col_name or not freq_col_name:
+        logger.error(f"Tabela '{freq_abs_table_name}' não contém as colunas de dezena ou frequência esperadas. Colunas encontradas: {df_freq_abs.columns.tolist()}")
+        return
+
+    # Calcula o rank geral
+    df_freq_abs['rank_geral'] = df_freq_abs[freq_col_name].rank(method='dense', ascending=False).astype(int)
+    
+    # Prepara o DataFrame para salvar
+    df_rank_geral = df_freq_abs[[dezena_col_name, freq_col_name, 'rank_geral']].copy()
+    df_rank_geral.rename(columns={
+        dezena_col_name: 'Dezena', # Padroniza nome da coluna
+        freq_col_name: 'frequencia_total' # Renomeia para clareza
+    }, inplace=True)
+    
+    rank_geral_table_name = "rank_geral_dezenas_por_frequencia"
+    try:
+        db_manager.save_dataframe_to_db(df_rank_geral, rank_geral_table_name, if_exists='replace')
+        logger.info(f"Ranking geral de dezenas salvo na tabela '{rank_geral_table_name}'. {len(df_rank_geral)} registros.")
+    except Exception as e:
+        logger.error(f"Erro ao salvar ranking geral na tabela '{rank_geral_table_name}': {e}", exc_info=True)
+    
+    logger.info("Cálculo e persistência de ranking geral de dezenas concluídos.")
