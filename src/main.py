@@ -36,23 +36,31 @@ ANALYSIS_PIPELINE = [
     {"name": "frequency-analysis", "func": ps.run_frequency_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "delay-analysis", "func": ps.run_delay_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "number-properties-analysis", "func": ps.run_number_properties_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
+    {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "pair-combination-analysis", "func": ps.run_pair_combination_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "cycle-identification-stats", "func": ps.run_cycle_identification_and_stats, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
-    {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # Usa o stub
+    {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {
-        "name": "rank-trend-analysis", # Slug
-        "func": ps.run_rank_trend_analysis_step, # <<< MODIFICADO para a função real
-        "args": ["db_manager"], # A função espera db_manager
-        "kwargs": {}
-    },
-    {
-        "name": "chunk-evol-analysis",
+        "name": "chunk-evol-analysis", # Gera dados de frequência por chunk (longo)
         "func": ps.run_chunk_evolution_analysis,
         "args": ["all_data_df", "db_manager"],
         "kwargs": {}
     },
+    {
+        "name": "rank-trend-analysis", # Gera dados de rank por chunk (longo) e rank geral
+        "func": ps.run_rank_trend_analysis_step, 
+        "args": ["db_manager"], 
+        "kwargs": {}
+    },
+    # NOVA ETAPA DE AGREGAÇÃO - deve vir DEPOIS das etapas que geram os dados que ela consome
+    {
+        "name": "block-aggregator", # Slug para a nova etapa de agregação
+        "func": ps.run_block_aggregation_step,
+        "args": ["db_manager"], # A função espera db_manager
+        "kwargs": {}
+    },
+    # Etapas de Visualização (geralmente no final)
     {
         "name": "chunk-evol-viz",
         "func": ps.run_chunk_evolution_visualization,
