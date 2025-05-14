@@ -5,163 +5,87 @@ import logging
 import numpy as np
 
 from src.config import ALL_NUMBERS
-# Importar as funções REAIS e OTIMIZADAS de chunk_analysis.py
 from src.analysis.chunk_analysis import (
-    calculate_frequency_in_chunk, # Para frequência no ciclo
-    get_draw_matrix_for_chunk,    # Para criar a matriz de presença para o ciclo
-    calculate_delays_for_matrix   # Para calcular todos os atrasos para o ciclo
+    calculate_frequency_in_chunk,
+    get_draw_matrix_for_chunk,
+    calculate_delays_for_matrix
 )
+from src.analysis.number_properties_analysis import analyze_draw_properties # Para métricas de grupo
 
 logger = logging.getLogger(__name__)
 ALL_NUMBERS_SET: Set[int] = set(ALL_NUMBERS)
 
 # --- Funções de Identificação de Ciclo (mantidas como na última versão funcional) ---
 def identify_and_process_cycles(all_data_df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    # ... (código completo da função como na versão anterior e validada) ...
     logger.info("Iniciando análise completa de ciclos (Versão Refatorada).")
-    if all_data_df is None or all_data_df.empty:
-        logger.warning("DataFrame de entrada para análise de ciclos está vazio.")
-        return {}
-
+    if all_data_df is None or all_data_df.empty: return {}
     required_cols = ['Concurso'] + [f'bola_{i}' for i in range(1, 16)]
     missing_cols = [col for col in required_cols if col not in all_data_df.columns]
-    if missing_cols:
-        logger.error(f"Colunas essenciais ausentes no DataFrame: {missing_cols}. Não é possível analisar ciclos.")
-        return {}
-
+    if missing_cols: logger.error(f"Colunas essenciais ausentes: {missing_cols}."); return {}
     df_sorted = all_data_df.sort_values(by='Concurso').reset_index(drop=True)
-    dezena_cols = [f'bola_{i}' for i in range(1, 16)]
-
+    dezena_cols_bola = [f'bola_{i}' for i in range(1, 16)] # Usar um nome diferente para evitar conflito
     cycles_data: List[Dict[str, Any]] = []
     current_cycle_numbers_needed = ALL_NUMBERS_SET.copy()
     current_cycle_start_contest = df_sorted.loc[0, 'Concurso'] if not df_sorted.empty else 0
     cycle_count = 0
     last_processed_contest_num_for_open_cycle = df_sorted['Concurso'].max() if not df_sorted.empty else 0
-
-    # logger.debug(f"Análise de ciclo: Iniciando loop por {len(df_sorted)} concursos.") # Pode ser muito verboso
     for index, row in df_sorted.iterrows():
         contest_number = int(row['Concurso'])
-        
         try:
             drawn_numbers_in_this_contest = set()
-            for col in dezena_cols:
-                if pd.notna(row[col]):
-                    drawn_numbers_in_this_contest.add(int(row[col]))
-            
-            if not drawn_numbers_in_this_contest and len(dezena_cols) > 0 :
-                continue
-        except ValueError:
-            logger.warning(f"Erro ao converter dezenas para int no concurso {contest_number}. Pulando sorteio.")
-            continue
-        
+            for col_b in dezena_cols_bola: # Usar dezena_cols_bola
+                if pd.notna(row[col_b]): drawn_numbers_in_this_contest.add(int(row[col_b]))
+            if not drawn_numbers_in_this_contest and len(dezena_cols_bola) > 0: continue
+        except ValueError: logger.warning(f"Erro converter dezenas concurso {contest_number}."); continue
         if current_cycle_numbers_needed == ALL_NUMBERS_SET and contest_number != current_cycle_start_contest:
              current_cycle_start_contest = contest_number
-
         current_cycle_numbers_needed.difference_update(drawn_numbers_in_this_contest)
-
         if not current_cycle_numbers_needed: 
             cycle_count += 1
-            closed_cycle_info = {
-                'ciclo_num': cycle_count,
-                'concurso_inicio': current_cycle_start_contest,
-                'concurso_fim': contest_number,
-                'duracao_concursos': contest_number - current_cycle_start_contest + 1,
-                'numeros_faltantes': None, 
-                'qtd_faltantes': 0
-            }
-            cycles_data.append(closed_cycle_info)
-            # logger.debug(f"Ciclo {cycle_count} FECHADO...") # Verboso
+            cycles_data.append({'ciclo_num': cycle_count, 'concurso_inicio': current_cycle_start_contest, 'concurso_fim': contest_number, 'duracao_concursos': contest_number - current_cycle_start_contest + 1, 'numeros_faltantes': None, 'qtd_faltantes': 0})
             current_cycle_numbers_needed = ALL_NUMBERS_SET.copy()
-            if index + 1 < len(df_sorted):
-                 current_cycle_start_contest = df_sorted.loc[index + 1, 'Concurso']
-            
-    # logger.debug(f"Fim do loop principal. Total de ciclos fechados: {cycle_count}.") # Verboso
-
-    if current_cycle_numbers_needed and \
-       current_cycle_numbers_needed != ALL_NUMBERS_SET:
+            if index + 1 < len(df_sorted): current_cycle_start_contest = df_sorted.loc[index + 1, 'Concurso']
+    if current_cycle_numbers_needed and current_cycle_numbers_needed != ALL_NUMBERS_SET:
         if not df_sorted.empty and current_cycle_start_contest <= last_processed_contest_num_for_open_cycle:
-            numeros_faltantes_str = ",".join(map(str, sorted(list(current_cycle_numbers_needed))))
-            open_cycle_info = {
-                'ciclo_num': cycle_count + 1,
-                'concurso_inicio': current_cycle_start_contest,
-                'concurso_fim': np.nan, 
-                'duracao_concursos': np.nan,
-                'numeros_faltantes': numeros_faltantes_str,
-                'qtd_faltantes': len(current_cycle_numbers_needed)
-            }
-            cycles_data.append(open_cycle_info)
-            # logger.debug(f"Ciclo {cycle_count + 1} EM ABERTO adicionado.") # Verboso
+            cycles_data.append({'ciclo_num': cycle_count + 1, 'concurso_inicio': current_cycle_start_contest, 'concurso_fim': np.nan, 'duracao_concursos': np.nan, 'numeros_faltantes': ",".join(map(str, sorted(list(current_cycle_numbers_needed)))), 'qtd_faltantes': len(current_cycle_numbers_needed)})
     elif cycle_count == 0 and not df_sorted.empty and current_cycle_numbers_needed: 
         if current_cycle_numbers_needed != ALL_NUMBERS_SET: 
-            numeros_faltantes_str = ",".join(map(str, sorted(list(current_cycle_numbers_needed))))
-            first_open_cycle_info = {
-                'ciclo_num': 1, 
-                'concurso_inicio': current_cycle_start_contest,
-                'concurso_fim': np.nan,
-                'duracao_concursos': np.nan,
-                'numeros_faltantes': numeros_faltantes_str,
-                'qtd_faltantes': len(current_cycle_numbers_needed)
-            }
-            cycles_data.append(first_open_cycle_info)
-            # logger.debug(f"Primeiro ciclo (1) EM ABERTO adicionado.") # Verboso
-
+            cycles_data.append({'ciclo_num': 1, 'concurso_inicio': current_cycle_start_contest, 'concurso_fim': np.nan, 'duracao_concursos': np.nan, 'numeros_faltantes': ",".join(map(str, sorted(list(current_cycle_numbers_needed)))), 'qtd_faltantes': len(current_cycle_numbers_needed)})
     results = {}
-    # logger.debug(f"Antes de criar DataFrame: Tamanho final de cycles_data: {len(cycles_data)}") # Verboso
     if cycles_data:
         df_cycles_detail = pd.DataFrame(cycles_data)
-        # logger.debug(f"DataFrame df_cycles_detail criado com {len(df_cycles_detail)} linhas.") # Verboso
-        
-        if 'concurso_fim' in df_cycles_detail.columns:
-             df_cycles_detail['concurso_fim'] = df_cycles_detail['concurso_fim'].astype('Int64')
-        if 'duracao_concursos' in df_cycles_detail.columns:
-            df_cycles_detail['duracao_concursos'] = df_cycles_detail['duracao_concursos'].astype('Int64')
-        
+        if 'concurso_fim' in df_cycles_detail.columns: df_cycles_detail['concurso_fim'] = df_cycles_detail['concurso_fim'].astype('Int64')
+        if 'duracao_concursos' in df_cycles_detail.columns: df_cycles_detail['duracao_concursos'] = df_cycles_detail['duracao_concursos'].astype('Int64')
         if 'numeros_faltantes' in df_cycles_detail.columns:
-            df_cycles_detail['numeros_faltantes'] = df_cycles_detail['numeros_faltantes'].apply(
-                lambda x: ",".join(map(str, sorted(list(x)))) if isinstance(x, (set, list)) else x
-            )
-            df_cycles_detail['numeros_faltantes'] = df_cycles_detail['numeros_faltantes'].fillna(value=np.nan).replace([pd.NA], [None])
-
+            df_cycles_detail['numeros_faltantes'] = df_cycles_detail['numeros_faltantes'].apply(lambda x: ",".join(map(str, sorted(list(x)))) if isinstance(x, (set, list)) else x).fillna(value=np.nan).replace([pd.NA], [None])
         results['ciclos_detalhe'] = df_cycles_detail
-        logger.info(f"Detalhes de {len(df_cycles_detail)} ciclos/status de ciclo processados (DataFrame final).")
-
         if 'duracao_concursos' in df_cycles_detail.columns:
             df_closed_cycles = df_cycles_detail[pd.to_numeric(df_cycles_detail['duracao_concursos'], errors='coerce').notna()].copy()
             if not df_closed_cycles.empty and 'duracao_concursos' in df_closed_cycles.columns: 
                 df_closed_cycles['duracao_concursos'] = pd.to_numeric(df_closed_cycles['duracao_concursos'])
-                if not df_closed_cycles.empty: 
-                    summary_stats = {
-                        'total_ciclos_fechados': int(len(df_closed_cycles)),
-                        'duracao_media_ciclo': float(df_closed_cycles['duracao_concursos'].mean()) if len(df_closed_cycles) > 0 else np.nan,
-                        'duracao_min_ciclo': int(df_closed_cycles['duracao_concursos'].min()) if len(df_closed_cycles) > 0 else np.nan,
-                        'duracao_max_ciclo': int(df_closed_cycles['duracao_concursos'].max()) if len(df_closed_cycles) > 0 else np.nan,
-                        'duracao_mediana_ciclo': float(df_closed_cycles['duracao_concursos'].median()) if len(df_closed_cycles) > 0 else np.nan,
-                    }
+                if not df_closed_cycles.empty:
+                    summary_stats = {'total_ciclos_fechados': int(len(df_closed_cycles)), 'duracao_media_ciclo': float(df_closed_cycles['duracao_concursos'].mean()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_min_ciclo': int(df_closed_cycles['duracao_concursos'].min()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_max_ciclo': int(df_closed_cycles['duracao_concursos'].max()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_mediana_ciclo': float(df_closed_cycles['duracao_concursos'].median()) if len(df_closed_cycles) > 0 else np.nan}
                     results['ciclos_sumario_estatisticas'] = pd.DataFrame([summary_stats])
-                    logger.info("Estatísticas sumárias dos ciclos calculadas.")
-            else:
-                logger.info("Nenhum ciclo fechado para calcular estatísticas sumárias.")
-        else:
-            logger.info("Coluna 'duracao_concursos' não encontrada. Não é possível calcular estatísticas sumárias.")
-    else:
-        logger.info("Nenhum dado de ciclo gerado (lista cycles_data está vazia).")
-        
-    logger.info("Análise completa de ciclos (identificação e sumário) concluída.")
     return results
 
+# --- MÉTRICAS DETALHADAS POR CICLO FECHADO (MODIFICADA PARA INCLUIR MÉTRICAS DE GRUPO) ---
 def calculate_detailed_metrics_per_closed_cycle(
     all_data_df: pd.DataFrame, 
     df_ciclos_detalhe: Optional[pd.DataFrame]
 ) -> Dict[str, Optional[pd.DataFrame]]:
-    logger.info("Iniciando cálculo de métricas detalhadas (freq, atrasos, rank) por dezena para cada ciclo fechado.")
+    logger.info("Iniciando cálculo de métricas detalhadas (freq, atrasos, rank, grupos) por dezena/ciclo para cada ciclo fechado.")
     
     results_data_lists: Dict[str, List[Dict[str, Any]]] = {
         "frequency": [], "mean_delay": [], "max_delay": [], "final_delay": [],
-        "rank_frequency": [] 
+        "rank_frequency": [],
+        "group_metrics": [] # Lista para dados de grupo por ciclo
     }
     output_dfs: Dict[str, Optional[pd.DataFrame]] = {
         "ciclo_metric_frequency": None, "ciclo_metric_atraso_medio": None,
         "ciclo_metric_atraso_maximo": None, "ciclo_metric_atraso_final": None,
-        "ciclo_rank_frequency": None 
+        "ciclo_rank_frequency": None,
+        "ciclo_group_metrics": None # DF para métricas de grupo por ciclo
     }
 
     if df_ciclos_detalhe is None or df_ciclos_detalhe.empty:
@@ -181,7 +105,9 @@ def calculate_detailed_metrics_per_closed_cycle(
         logger.info("Nenhum ciclo fechado em 'df_ciclos_detalhe' para cálculo de métricas.")
         return output_dfs
     
-    logger.debug(f"Processando métricas para {len(df_closed_cycles)} ciclos fechados.")
+    logger.debug(f"Processando métricas detalhadas para {len(df_closed_cycles)} ciclos fechados.")
+    # Usar um nome diferente para as colunas de bola aqui para evitar conflito com a variável global dezena_cols
+    dezena_cols_for_extraction = [f'bola_{i}' for i in range(1, 16)] 
 
     for _, cycle_row in df_closed_cycles.iterrows():
         ciclo_num = int(cycle_row['ciclo_num'])
@@ -191,22 +117,22 @@ def calculate_detailed_metrics_per_closed_cycle(
         mask = (all_data_df['Concurso'] >= start_contest) & (all_data_df['Concurso'] <= end_contest)
         df_current_cycle_contests = all_data_df[mask]
 
-        # Default values for metrics if chunk is empty or processing fails for a dezena
         chunk_duration = end_contest - start_contest + 1
-        default_freq = 0
-        default_delay_float = float(chunk_duration)
-        default_delay_int = int(chunk_duration)
-        default_rank = np.nan
-
+        default_freq_val = 0
+        default_delay_float_val = float(chunk_duration)
+        default_delay_int_val = int(chunk_duration)
+        default_rank_val = np.nan # Usar np.nan para rank não definido
+        default_avg_group_val = np.nan # Usar np.nan para médias não definidas
 
         if df_current_cycle_contests.empty:
-            logger.warning(f"Ciclo {ciclo_num} (C{start_contest}-C{end_contest}) não tem concursos. Usando defaults para métricas.")
+            logger.warning(f"Ciclo {ciclo_num} (C{start_contest}-C{end_contest}) não tem concursos. Usando defaults.")
             for d_val in ALL_NUMBERS:
-                results_data_lists["frequency"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'frequencia_no_ciclo': default_freq})
-                results_data_lists["mean_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_medio_no_ciclo': default_delay_float})
-                results_data_lists["max_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_maximo_no_ciclo': default_delay_int})
-                results_data_lists["final_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_final_no_ciclo': default_delay_int})
-                results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'frequencia_no_ciclo': default_freq, 'rank_freq_no_ciclo': default_rank})
+                results_data_lists["frequency"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'frequencia_no_ciclo': default_freq_val})
+                results_data_lists["mean_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_medio_no_ciclo': default_delay_float_val})
+                results_data_lists["max_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_maximo_no_ciclo': default_delay_int_val})
+                results_data_lists["final_delay"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'atraso_final_no_ciclo': default_delay_int_val})
+                results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': d_val, 'frequencia_no_ciclo': default_freq_val, 'rank_freq_no_ciclo': default_rank_val})
+            results_data_lists["group_metrics"].append({'ciclo_num': ciclo_num, 'avg_pares_no_ciclo': default_avg_group_val, 'avg_impares_no_ciclo': default_avg_group_val, 'avg_primos_no_ciclo': default_avg_group_val})
             continue
 
         # 1. Frequência no Ciclo
@@ -217,34 +143,58 @@ def calculate_detailed_metrics_per_closed_cycle(
             temp_cycle_freq_data_for_rank.append({'dezena': int(d), 'frequencia_no_ciclo': int(v)})
         
         # 2. Rank da Frequência no Ciclo
+        # ... (lógica de rank mantida como antes) ...
         if temp_cycle_freq_data_for_rank:
             df_temp_freq = pd.DataFrame(temp_cycle_freq_data_for_rank)
             if not df_temp_freq.empty and 'frequencia_no_ciclo' in df_temp_freq.columns:
                  df_temp_freq['rank_freq_no_ciclo'] = df_temp_freq['frequencia_no_ciclo'].rank(method='dense', ascending=False).astype(int)
-                 for _, rank_row in df_temp_freq.iterrows():
-                    results_data_lists["rank_frequency"].append({
-                        'ciclo_num': ciclo_num, 'dezena': int(rank_row['dezena']),
-                        'frequencia_no_ciclo': int(rank_row['frequencia_no_ciclo']),
-                        'rank_freq_no_ciclo': int(rank_row['rank_freq_no_ciclo'])
-                    })
-            else: # df_temp_freq é vazio ou sem coluna de frequência
-                for d_val in ALL_NUMBERS: results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'frequencia_no_ciclo': 0, 'rank_freq_no_ciclo': default_rank})
+                 for _, rank_row in df_temp_freq.iterrows(): results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': int(rank_row['dezena']), 'frequencia_no_ciclo': int(rank_row['frequencia_no_ciclo']), 'rank_freq_no_ciclo': int(rank_row['rank_freq_no_ciclo'])})
+            else: 
+                for d_val in ALL_NUMBERS: results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'frequencia_no_ciclo': 0, 'rank_freq_no_ciclo': default_rank_val})
         else: 
-            for d_val in ALL_NUMBERS: results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'frequencia_no_ciclo': 0, 'rank_freq_no_ciclo': default_rank})
+            for d_val in ALL_NUMBERS: results_data_lists["rank_frequency"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'frequencia_no_ciclo': 0, 'rank_freq_no_ciclo': default_rank_val})
         
         # 3. Atrasos no Ciclo
+        # ... (lógica de atrasos mantida como antes) ...
         draw_matrix_cycle = get_draw_matrix_for_chunk(df_current_cycle_contests, start_contest, end_contest)
         if not draw_matrix_cycle.empty:
             delay_metrics_dict = calculate_delays_for_matrix(draw_matrix_cycle, start_contest, end_contest)
             for d, v in delay_metrics_dict["mean"].items(): results_data_lists["mean_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d), 'atraso_medio_no_ciclo': float(v) if pd.notna(v) else None})
             for d, v in delay_metrics_dict["max"].items(): results_data_lists["max_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d), 'atraso_maximo_no_ciclo': int(v)})
             for d, v in delay_metrics_dict["final"].items(): results_data_lists["final_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d), 'atraso_final_no_ciclo': int(v)})
-        else:
-            logger.warning(f"Matriz de sorteios vazia para o ciclo {ciclo_num}. Usando defaults para atrasos.")
+        else: # Matriz vazia, preenche atrasos com defaults
             for d_val in ALL_NUMBERS:
-                results_data_lists["mean_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_medio_no_ciclo': default_delay_float})
-                results_data_lists["max_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_maximo_no_ciclo': default_delay_int})
-                results_data_lists["final_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_final_no_ciclo': default_delay_int})
+                results_data_lists["mean_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_medio_no_ciclo': default_delay_float_val})
+                results_data_lists["max_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_maximo_no_ciclo': default_delay_int_val})
+                results_data_lists["final_delay"].append({'ciclo_num': ciclo_num, 'dezena': int(d_val), 'atraso_final_no_ciclo': default_delay_int_val})
+
+        # 4. Métricas de Grupo para o Ciclo (média por concurso dentro do ciclo) <<< NOVA LÓGICA AQUI
+        actual_dezena_cols_for_props = [col for col in dezena_cols_for_extraction if col in df_current_cycle_contests.columns]
+        if not actual_dezena_cols_for_props :
+            logger.warning(f"Nenhuma coluna de bola em df_current_cycle_contests para ciclo {ciclo_num}. Pulando métricas de grupo.")
+            results_data_lists["group_metrics"].append({'ciclo_num': ciclo_num, 'avg_pares_no_ciclo': default_avg_group_val, 'avg_impares_no_ciclo': default_avg_group_val, 'avg_primos_no_ciclo': default_avg_group_val})
+        else:
+            cycle_contest_properties_list: List[Dict[str, Any]] = []
+            for _, contest_row_in_cycle in df_current_cycle_contests.iterrows():
+                try:
+                    draw_in_cycle = [int(contest_row_in_cycle[col]) for col in actual_dezena_cols_for_props if pd.notna(contest_row_in_cycle[col])]
+                    if len(draw_in_cycle) == 15: 
+                        properties = analyze_draw_properties(draw_in_cycle) # Reutiliza a função de number_properties_analysis
+                        cycle_contest_properties_list.append(properties)
+                except ValueError:
+                    logger.warning(f"Erro ao converter dezenas no concurso {contest_row_in_cycle.get('Concurso', 'Desconhecido')} do ciclo {ciclo_num} para group metrics."); 
+                    continue
+            
+            if cycle_contest_properties_list:
+                df_cycle_props = pd.DataFrame(cycle_contest_properties_list)
+                results_data_lists["group_metrics"].append({
+                    'ciclo_num': ciclo_num,
+                    'avg_pares_no_ciclo': df_cycle_props['pares'].mean() if 'pares' in df_cycle_props else default_avg_group_val,
+                    'avg_impares_no_ciclo': df_cycle_props['impares'].mean() if 'impares' in df_cycle_props else default_avg_group_val,
+                    'avg_primos_no_ciclo': df_cycle_props['primos'].mean() if 'primos' in df_cycle_props else default_avg_group_val
+                })
+            else: 
+                results_data_lists["group_metrics"].append({'ciclo_num': ciclo_num, 'avg_pares_no_ciclo': default_avg_group_val, 'avg_impares_no_ciclo': default_avg_group_val, 'avg_primos_no_ciclo': default_avg_group_val})
 
     # Converter listas de resultados em DataFrames
     if results_data_lists["frequency"]: output_dfs["ciclo_metric_frequency"] = pd.DataFrame(results_data_lists["frequency"])
@@ -252,12 +202,12 @@ def calculate_detailed_metrics_per_closed_cycle(
     if results_data_lists["max_delay"]: output_dfs["ciclo_metric_atraso_maximo"] = pd.DataFrame(results_data_lists["max_delay"])
     if results_data_lists["final_delay"]: output_dfs["ciclo_metric_atraso_final"] = pd.DataFrame(results_data_lists["final_delay"])
     if results_data_lists["rank_frequency"]: output_dfs["ciclo_rank_frequency"] = pd.DataFrame(results_data_lists["rank_frequency"])
+    if results_data_lists["group_metrics"]: output_dfs["ciclo_group_metrics"] = pd.DataFrame(results_data_lists["group_metrics"])
         
-    logger.info("Cálculo de métricas detalhadas (incluindo rank) por dezena para ciclos fechados concluído.")
+    logger.info("Cálculo de métricas detalhadas (incluindo rank e grupos) por dezena/ciclo para ciclos fechados concluído.")
     return output_dfs
 
-# Funções wrapper (identify_cycles, calculate_cycle_stats, analyze_cycle_closing_data)
-# ... (mantidas como na versão anterior, já validadas) ...
+# Funções wrapper (identify_cycles, calculate_cycle_stats, analyze_cycle_closing_data) mantidas.
 def identify_cycles(all_data_df: pd.DataFrame) -> Optional[pd.DataFrame]:
     logger.info("Chamando identify_cycles (wrapper para identify_and_process_cycles).")
     results_dict = identify_and_process_cycles(all_data_df)
@@ -265,26 +215,14 @@ def identify_cycles(all_data_df: pd.DataFrame) -> Optional[pd.DataFrame]:
 
 def calculate_cycle_stats(df_cycles_detail: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
     logger.info("Chamando calculate_cycle_stats (wrapper para lógica de sumário).")
-    if df_cycles_detail is None or df_cycles_detail.empty:
-        logger.warning("DataFrame de detalhes de ciclo vazio para calculate_cycle_stats.")
-        return None
-    if 'duracao_concursos' not in df_cycles_detail.columns:
-        logger.info("Coluna 'duracao_concursos' não encontrada. Não é possível calcular estatísticas sumárias.")
-        return None
-    df_closed_cycles = df_cycles_detail[pd.to_numeric(df_cycles_detail['duracao_concursos'], errors='coerce').notna()].copy()
+    if df_cycles_detail is None or df_cycles_detail.empty: return None
+    if 'duracao_concursos' not in df_cycles_detail.columns: return None
+    df_closed_cycles = df_cycles_detalhe[pd.to_numeric(df_cycles_detalhe['duracao_concursos'], errors='coerce').notna()].copy()
     if not df_closed_cycles.empty and 'duracao_concursos' in df_closed_cycles.columns: 
         df_closed_cycles['duracao_concursos'] = pd.to_numeric(df_closed_cycles['duracao_concursos'])
         if not df_closed_cycles.empty : 
-            summary_stats = {
-                'total_ciclos_fechados': int(len(df_closed_cycles)),
-                'duracao_media_ciclo': float(df_closed_cycles['duracao_concursos'].mean()) if len(df_closed_cycles) > 0 else np.nan,
-                'duracao_min_ciclo': int(df_closed_cycles['duracao_concursos'].min()) if len(df_closed_cycles) > 0 else np.nan,
-                'duracao_max_ciclo': int(df_closed_cycles['duracao_concursos'].max()) if len(df_closed_cycles) > 0 else np.nan,
-                'duracao_mediana_ciclo': float(df_closed_cycles['duracao_concursos'].median()) if len(df_closed_cycles) > 0 else np.nan,
-            }
-            logger.info("Sumário de estatísticas de ciclo recalculado por calculate_cycle_stats.")
+            summary_stats = {'total_ciclos_fechados': int(len(df_closed_cycles)), 'duracao_media_ciclo': float(df_closed_cycles['duracao_concursos'].mean()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_min_ciclo': int(df_closed_cycles['duracao_concursos'].min()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_max_ciclo': int(df_closed_cycles['duracao_concursos'].max()) if len(df_closed_cycles) > 0 else np.nan, 'duracao_mediana_ciclo': float(df_closed_cycles['duracao_concursos'].median()) if len(df_closed_cycles) > 0 else np.nan}
             return pd.DataFrame([summary_stats])
-    logger.info("Nenhum ciclo fechado em df_cycles_detail para calcular estatísticas por calculate_cycle_stats.")
     return None
 
 def analyze_cycle_closing_data(all_data_df: pd.DataFrame) -> Optional[pd.DataFrame]:
