@@ -1,45 +1,128 @@
-# src/config.py
-from pathlib import Path
+# Lotofacil_Analysis/src/config.py
+import os
+import logging
+from dotenv import load_dotenv
+from typing import List, Dict, Any
 
-# --- Configurações de Diretório ---
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "Data"
-LOG_DIR_CONFIG = BASE_DIR / "Logs"
-PLOT_DIR_CONFIG = BASE_DIR / "Plots"
+load_dotenv()
+logger = logging.getLogger(__name__)
 
-# --- Configurações de Arquivos de Dados ---
-RAW_DATA_FILE_NAME = "historico.csv"
-CLEANED_DATA_FILE_NAME = "historico_cleaned_numeros.pkl"
-DB_FILE_NAME = "lotofacil_analysis.db"
+# --- Definições de Constantes no Nível do Módulo ---
+BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Raiz do projeto Lotofacil_Analysis/
+# CORREÇÃO AQUI: DATA_DIR deve ser diretamente sob BASE_DIR
+DATA_DIR: str = os.path.join(BASE_DIR, 'Data')
+LOG_DIR: str = os.path.join(BASE_DIR, 'Logs') # Assumindo Logs/ na raiz do projeto também
+PLOT_DIR: str = os.path.join(BASE_DIR, 'Plots')
 
-# Constantes para data_loader.py
-COLUMNS_TO_KEEP = [
-    'Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5',
-    'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12',
-    'Bola13', 'Bola14', 'Bola15'
-]
-NEW_COLUMN_NAMES = [
-    'Concurso', 'Data Sorteio',
-    'bola_1', 'bola_2', 'bola_3', 'bola_4', 'bola_5',
-    'bola_6', 'bola_7', 'bola_8', 'bola_9', 'bola_10', 'bola_11', 'bola_12',
-    'bola_13', 'bola_14', 'bola_15'
-]
-BALL_NUMBER_COLUMNS = [f'bola_{i}' for i in range(1, 16)]
+PLOT_DIR_CONFIG: str = os.getenv('PLOT_DIR', PLOT_DIR)
+RAW_DATA_FILE_NAME: str = os.getenv('RAW_DATA_FILE_NAME', 'historico.csv')
+CLEANED_DATA_FILE_NAME: str = os.getenv('CLEANED_DATA_FILE_NAME', 'cleaned_draws.pkl')
 
-# --- Configurações do Jogo Lotofácil ---
-ALL_NUMBERS = list(range(1, 26)) # <<<--- ALL_NUMBERS é uma lista
-NUM_DEZENAS_LOTOFACIL = 15
-MAX_NUMBER = 25
+_columns_to_keep_str: str = os.getenv('COLUMNS_TO_KEEP', 'Concurso,Data Sorteio,Bola1,Bola2,Bola3,Bola4,Bola5,Bola6,Bola7,Bola8,Bola9,Bola10,Bola11,Bola12,Bola13,Bola14,Bola15')
+COLUMNS_TO_KEEP: List[str] = [col.strip() for col in _columns_to_keep_str.split(',')]
 
-# --- Configurações de Análise de Chunks ---
-CHUNK_TYPES_CONFIG = {
-    "linear": {"sizes": [10, 25, 50, 75, 100, 150, 200], "description": "Blocos lineares de tamanhos fixos."},
-    "fibonacci": {"sizes": [5, 8, 13, 21, 34, 55, 89, 144], "description": "Blocos com tamanhos baseados na sequência de Fibonacci."},
-    "prime": {"sizes": [5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97], "description": "Blocos com tamanhos baseados em números primos."},
-    "doidos": {"sizes": [33, 66, 99, 122, 157, 190], "description": "Blocos com tamanhos baseados em uma sequência arbitrária 'doida'."}
+_new_column_names_str: str = os.getenv('NEW_COLUMN_NAMES', 'contest_id,Data Sorteio,ball_1,ball_2,ball_3,ball_4,ball_5,ball_6,ball_7,ball_8,ball_9,ball_10,ball_11,ball_12,ball_13,ball_14,ball_15')
+NEW_COLUMN_NAMES: List[str] = [col.strip() for col in _new_column_names_str.split(',')]
+
+_ball_number_columns_str: str = os.getenv('BALL_NUMBER_COLUMNS', 'ball_1,ball_2,ball_3,ball_4,ball_5,ball_6,ball_7,ball_8,ball_9,ball_10,ball_11,ball_12,ball_13,ball_14,ball_15')
+BALL_NUMBER_COLUMNS: List[str] = [col.strip() for col in _ball_number_columns_str.split(',')]
+
+DB_NAME: str = os.getenv('DB_NAME', 'lotofacil.db')
+DB_PATH: str = os.path.join(DATA_DIR, DB_NAME) # Banco de dados dentro da pasta Data/
+
+HISTORICO_CSV_FILENAME: str = RAW_DATA_FILE_NAME
+HISTORICO_CSV_PATH: str = os.path.join(DATA_DIR, HISTORICO_CSV_FILENAME)
+CLEANED_DATA_PATH: str = os.path.join(DATA_DIR, CLEANED_DATA_FILE_NAME)
+
+ALL_NUMBERS: List[int] = list(range(1, 26))
+NUMBERS_PER_DRAW: int = 15
+
+DRAWN_NUMBERS_COLUMN_NAME: str = os.getenv('DRAWN_NUMBERS_COLUMN_NAME', 'drawn_numbers')
+CONTEST_ID_COLUMN_NAME: str = os.getenv('CONTEST_ID_COLUMN_NAME', 'contest_id')
+DATE_COLUMN_NAME: str = os.getenv('DATE_COLUMN_NAME', 'date')
+
+CHUNK_TYPES_CONFIG: Dict[str, List[int]] = {
+    "linear": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_LINEAR', '10,25,50,75,100,150,200').split(',')],
+    "fibonacci": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_FIBONACCI', '5,8,13,21,34,55,89,144').split(',')],
+    "primes": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_PRIMES', '2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97').split(',')],
+    "doidos": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_DOIDOS', '33,66,99,122,157,190').split(',')]
 }
 
-# --- Configurações Padrão para Plotagem (Exemplos) ---
-DEFAULT_CHUNK_TYPE_FOR_PLOTTING = 'linear'
-DEFAULT_CHUNK_SIZE_FOR_PLOTTING = 50
-DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT = [7, 14, 21]
+APRIORI_MIN_SUPPORT: float = float(os.getenv('APRIORI_MIN_SUPPORT', 0.02))
+FREQUENT_ITEMSETS_MIN_LEN: int = int(os.getenv('FREQUENT_ITEMSETS_MIN_LEN', 3))
+FREQUENT_ITEMSETS_MAX_LEN: int = int(os.getenv('FREQUENT_ITEMSETS_MAX_LEN', 8))
+
+LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO').upper()
+LOG_FILE: str = os.path.join(LOG_DIR, 'lotofacil_analysis.log')
+
+DEFAULT_CHUNK_TYPE_FOR_PLOTTING: str = os.getenv('DEFAULT_CHUNK_TYPE_FOR_PLOTTING', 'linear')
+DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = int(os.getenv('DEFAULT_CHUNK_SIZE_FOR_PLOTTING', '50'))
+_default_dezenas_plot_str: str = os.getenv('DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT', '1,7,13,19,25')
+DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = [int(d.strip()) for d in _default_dezenas_plot_str.split(',')]
+
+
+class Config:
+    BASE_DIR: str = BASE_DIR
+    DATA_DIR: str = DATA_DIR # Corrigido
+    LOG_DIR: str = LOG_DIR   # Corrigido
+    PLOT_DIR: str = PLOT_DIR # Corrigido
+    PLOT_DIR_CONFIG: str = PLOT_DIR_CONFIG
+
+    DB_PATH: str = DB_PATH
+    RAW_DATA_FILE_NAME: str = RAW_DATA_FILE_NAME
+    CLEANED_DATA_FILE_NAME: str = CLEANED_DATA_FILE_NAME
+    HISTORICO_CSV_PATH: str = HISTORICO_CSV_PATH
+    CLEANED_DATA_PATH: str = CLEANED_DATA_PATH
+    COLUMNS_TO_KEEP: List[str] = COLUMNS_TO_KEEP
+    NEW_COLUMN_NAMES: List[str] = NEW_COLUMN_NAMES
+    BALL_NUMBER_COLUMNS: List[str] = BALL_NUMBER_COLUMNS
+    ALL_NUMBERS: List[int] = ALL_NUMBERS
+    NUMBERS_PER_DRAW: int = NUMBERS_PER_DRAW
+    DRAWN_NUMBERS_COLUMN_NAME: str = DRAWN_NUMBERS_COLUMN_NAME
+    CONTEST_ID_COLUMN_NAME: str = CONTEST_ID_COLUMN_NAME
+    DATE_COLUMN_NAME: str = DATE_COLUMN_NAME
+    CHUNK_TYPES_CONFIG: Dict[str, List[int]] = CHUNK_TYPES_CONFIG
+    CHUNK_TYPES: Dict[str, List[int]] = CHUNK_TYPES_CONFIG # Alias
+
+    FREQUENCY_TOP_N_HOT: int = int(os.getenv('FREQUENCY_TOP_N_HOT', '5'))
+    FREQUENCY_BOTTOM_N_COLD: int = int(os.getenv('FREQUENCY_BOTTOM_N_COLD', '5'))
+
+    APRIORI_MIN_SUPPORT: float = APRIORI_MIN_SUPPORT
+    FREQUENT_ITEMSETS_MIN_LEN: int = FREQUENT_ITEMSETS_MIN_LEN
+    FREQUENT_ITEMSETS_MAX_LEN: int = FREQUENT_ITEMSETS_MAX_LEN
+    
+    LOG_LEVEL: str = LOG_LEVEL
+    LOG_FILE: str = LOG_FILE
+
+    DEFAULT_CHUNK_TYPE_FOR_PLOTTING: str = DEFAULT_CHUNK_TYPE_FOR_PLOTTING
+    DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = DEFAULT_CHUNK_SIZE_FOR_PLOTTING
+    DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT
+
+    def __init__(self):
+        os.makedirs(self.LOG_DIR, exist_ok=True)
+        os.makedirs(self.PLOT_DIR, exist_ok=True)
+        os.makedirs(self.DATA_DIR, exist_ok=True) # Adicionado para garantir que DATA_DIR exista
+        logger.info("Objeto Config instanciado. Configurações carregadas.")
+        logger.debug(f"BASE_DIR: {self.BASE_DIR}")
+        logger.debug(f"DATA_DIR: {self.DATA_DIR}")
+        logger.debug(f"LOG_DIR: {self.LOG_DIR}")
+        logger.debug(f"PLOT_DIR: {self.PLOT_DIR}")
+        logger.debug(f"DB_PATH: {self.DB_PATH}")
+        logger.debug(f"HISTORICO_CSV_PATH: {self.HISTORICO_CSV_PATH}")
+
+
+try:
+    config_obj = Config()
+except Exception as e:
+    logger.critical(f"Falha crítica ao instanciar Config: {e}", exc_info=True)
+    print(f"ERRO CRÍTICO: Falha ao instanciar Config: {e}")
+    config_obj = None 
+
+if __name__ == '__main__':
+    if config_obj:
+        print(f"BASE_DIR: {config_obj.BASE_DIR}")
+        print(f"DATA_DIR: {config_obj.DATA_DIR}")
+        print(f"HISTORICO_CSV_PATH: {config_obj.HISTORICO_CSV_PATH}")
+        # ... outros prints de teste ...
+    else:
+        print("Instância config_obj não pôde ser criada.")

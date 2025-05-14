@@ -1,213 +1,294 @@
-# src/database_manager.py
+# Lotofacil_Analysis/src/database_manager.py
 import sqlite3
 import pandas as pd
-from pathlib import Path
 import logging
-from typing import List, Optional
-
-# Importar as constantes de configuração relevantes do config.py
-# DATABASE_PATH não existe; usaremos DATA_DIR e DB_FILE_NAME para construir o caminho.
-from src.config import (
-    DB_FILE_NAME,       # Nome do arquivo do banco de dados (ex: "lotofacil_analysis.db")
-    DATA_DIR            # Diretório onde o arquivo do BD será armazenado (ex: BASE_DIR / "Data")
-)
+from typing import List, Dict, Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    """
-    Gerencia todas as interações com o banco de dados SQLite.
-    """
-    def __init__(self, db_path: Optional[str] = None):
-        """
-        Inicializa o DatabaseManager.
-
-        Args:
-            db_path: Caminho completo para o arquivo do banco de dados.
-                     Se None, constrói o caminho a partir de DATA_DIR e DB_FILE_NAME
-                     definidos em src.config.
-        """
-        if db_path:
-            self.db_path = Path(db_path)
-            logger.info(f"DatabaseManager usando db_path fornecido: {self.db_path}")
-        else:
-            # Constrói o caminho do banco de dados usando DATA_DIR e DB_FILE_NAME de config.py
-            if DATA_DIR and DB_FILE_NAME:
-                self.db_path = DATA_DIR / DB_FILE_NAME
-                logger.info(f"Nenhum db_path explícito fornecido. Usando caminho construído do config: {self.db_path}")
-            else:
-                # Fallback crítico se as constantes não estiverem devidamente configuradas em config.py
-                # Isso não deveria acontecer se config.py estiver correto.
-                default_fallback_path = Path("lotofacil_default_critical_error.db")
-                logger.error(
-                    f"DATA_DIR ou DB_FILE_NAME não estão configurados corretamente em src.config.py "
-                    f"e nenhum db_path foi fornecido ao DatabaseManager. "
-                    f"Usando fallback crítico: {default_fallback_path}"
-                )
-                self.db_path = default_fallback_path
-                # Poderia também levantar um ValueError aqui para forçar a correção da configuração:
-                # raise ValueError("Caminho do banco de dados não pôde ser determinado devido à falta de DATA_DIR ou DB_FILE_NAME em config.py.")
-
-        self._ensure_db_directory_exists()
-        logger.info(f"DatabaseManager inicializado. Banco de dados em: {self.db_path}")
-
-    def _ensure_db_directory_exists(self):
-        """
-        Garante que o diretório pai do arquivo de banco de dados exista.
-        """
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.conn: Optional[sqlite3.Connection] = None
+        self.cursor: Optional[sqlite3.Cursor] = None
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"Diretório do banco de dados '{self.db_path.parent}' verificado/criado.")
-        except Exception as e:
-            logger.error(f"Erro ao tentar criar o diretório do banco de dados '{self.db_path.parent}': {e}", exc_info=True)
-            # Dependendo da criticidade, pode-se levantar o erro aqui.
-
-    def get_connection(self) -> sqlite3.Connection:
-        """
-        Retorna uma nova conexão com o banco de dados.
-        O chamador é responsável por fechar a conexão.
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            logger.debug(f"Conexão com o banco de dados '{self.db_path}' estabelecida.")
-            return conn
+            self.connect()
+            # _create_all_tables deve ser chamado aqui se você quiser que as tabelas
+            # sejam criadas/verificadas na instanciação.
+            # Vou comentar por enquanto, pois o main.py pode estar chamando-o
+            # ou ele pode ser chamado seletivamente.
+            # self._create_all_tables() # Descomente se necessário na inicialização
+            logger.info(f"Database Manager inicializado e conectado a: {db_path}")
         except sqlite3.Error as e:
-            logger.error(f"Erro ao conectar ao banco de dados '{self.db_path}': {e}", exc_info=True)
-            raise  # Propaga o erro para que o chamador possa lidar com ele
+            logger.error(f"Erro ao inicializar o DatabaseManager para {db_path}: {e}", exc_info=True)
+            raise
 
-    def save_dataframe_to_db(self, df: pd.DataFrame, table_name: str, if_exists: str = 'replace'):
-        """
-        Salva um DataFrame do Pandas em uma tabela no banco de dados SQLite.
-
-        Args:
-            df: DataFrame a ser salvo.
-            table_name: Nome da tabela onde o DataFrame será salvo.
-            if_exists: Comportamento se a tabela já existir ('replace', 'append', 'fail').
-                       Padrão é 'replace'.
-        """
-        if df.empty and if_exists == 'replace':
-            logger.warning(f"Tentando salvar um DataFrame vazio na tabela '{table_name}' com if_exists='replace'. "
-                           f"Se a tabela existir, ela será substituída por uma tabela vazia (ou nenhuma tabela, dependendo do driver). "
-                           f"Para evitar isso, não chame save_dataframe_to_db com DataFrames vazios para if_exists='replace'.")
-            # Opcionalmente, pode-se optar por não fazer nada aqui ou apenas dropar a tabela se ela existir.
-            # Por enquanto, vamos permitir que o pandas lide com isso, mas o log é importante.
-        
-        logger.info(f"Salvando DataFrame na tabela '{table_name}' (modo: {if_exists}). DataFrame com {len(df)} linhas.")
+    def connect(self) -> None:
+        """Estabelece a conexão com o banco de dados SQLite."""
         try:
-            with self.get_connection() as conn:
-                df.to_sql(table_name, conn, if_exists=if_exists, index=False)
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.execute("PRAGMA foreign_keys = ON;")
+            self.cursor = self.conn.cursor()
+            logger.debug(f"Conexão com o banco de dados {self.db_path} estabelecida.")
+        except sqlite3.Error as e:
+            logger.error(f"Erro ao conectar ao banco de dados {self.db_path}: {e}", exc_info=True)
+            raise
+
+    def close(self) -> None:
+        """Fecha a conexão com o banco de dados."""
+        if self.conn:
+            try:
+                self.conn.close()
+                logger.debug(f"Conexão com o banco de dados {self.db_path} fechada.")
+            except sqlite3.Error as e:
+                logger.error(f"Erro ao fechar a conexão com o banco de dados: {e}", exc_info=True)
+        self.conn = None
+        self.cursor = None
+
+    def _execute_query(self, query: str, params: Tuple = None, commit: bool = False) -> None:
+        if not self.conn or not self.cursor:
+            logger.error("Tentativa de executar query sem uma conexão ativa.")
+            raise sqlite3.Error("Conexão com o banco de dados não está ativa.")
+        try:
+            logger.debug(f"Executando query: {query} com params: {params}")
+            self.cursor.execute(query, params or ())
+            if commit:
+                self.conn.commit()
+                logger.debug("Query comitada.")
+        except sqlite3.Error as e:
+            logger.error(f"Erro ao executar query: {query} - {e}", exc_info=True)
+            raise
+
+    def save_dataframe(self, df: pd.DataFrame, table_name: str, if_exists: str = 'replace') -> None:
+        if not self.conn:
+            logger.error("Tentativa de salvar DataFrame sem uma conexão ativa.")
+            raise sqlite3.Error("Conexão com o banco de dados não está ativa.")
+        if df is None or df.empty:
+            logger.warning(f"DataFrame para a tabela '{table_name}' está vazio ou é None. Nada será salvo.")
+            return
+        try:
+            logger.info(f"Salvando DataFrame na tabela '{table_name}' (if_exists='{if_exists}'). Linhas: {len(df)}")
+            df.to_sql(table_name, self.conn, if_exists=if_exists, index=False)
             logger.info(f"DataFrame salvo com sucesso na tabela '{table_name}'.")
-        except sqlite3.Error as e:
-            logger.error(f"Erro SQLite ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"Erro inesperado ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
+            logger.error(f"Erro ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
+            raise
 
-    def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
+    def load_dataframe(self, table_name: str) -> Optional[pd.DataFrame]:
         """
-        Carrega uma tabela do banco de dados SQLite para um DataFrame do Pandas.
-
-        Args:
-            table_name: Nome da tabela a ser carregada.
-
-        Returns:
-            DataFrame com os dados da tabela, ou None se a tabela não existir ou ocorrer um erro.
+        Carrega uma tabela inteira do banco de dados para um DataFrame pandas.
         """
-        logger.info(f"Carregando dados da tabela '{table_name}'.")
         if not self.table_exists(table_name):
-            logger.warning(f"Tabela '{table_name}' não encontrada no banco de dados '{self.db_path}'.")
-            return None # Ou retornar um DataFrame vazio: pd.DataFrame()
-        
+            logger.warning(f"Tabela '{table_name}' não existe. Retornando DataFrame vazio.")
+            return pd.DataFrame()
+        if not self.conn:
+            logger.error(f"Tentativa de carregar tabela '{table_name}' sem conexão.")
+            return pd.DataFrame()
         try:
-            with self.get_connection() as conn:
-                df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-            logger.info(f"Dados da tabela '{table_name}' carregados com sucesso. DataFrame com {len(df)} linhas.")
+            logger.info(f"Carregando DataFrame da tabela '{table_name}'.")
+            df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
+            logger.info(f"DataFrame da tabela '{table_name}' carregado com {len(df)} linhas.")
             return df
-        except sqlite3.Error as e:
-            logger.error(f"Erro SQLite ao carregar dados da tabela '{table_name}': {e}", exc_info=True)
-            return None # Ou retornar um DataFrame vazio
         except Exception as e:
-            logger.error(f"Erro inesperado ao carregar dados da tabela '{table_name}': {e}", exc_info=True)
-            return None # Ou retornar um DataFrame vazio
+            logger.error(f"Erro ao carregar DataFrame da tabela '{table_name}': {e}", exc_info=True)
+            return pd.DataFrame()
+
+    # Alias para compatibilidade com o código existente que usa load_dataframe_from_db
+    def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
+        logger.debug(f"Chamando load_dataframe_from_db, redirecionando para load_dataframe para tabela: {table_name}")
+        return self.load_dataframe(table_name)
 
     def table_exists(self, table_name: str) -> bool:
-        """
-        Verifica se uma tabela existe no banco de dados.
-
-        Args:
-            table_name: Nome da tabela a ser verificada.
-
-        Returns:
-            True se a tabela existir, False caso contrário.
-        """
-        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, (table_name,))
-                result = cursor.fetchone()
-            return result is not None
-        except sqlite3.Error as e:
-            logger.error(f"Erro SQLite ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
-            return False # Assumir que não existe em caso de erro de consulta
-        except Exception as e:
-            logger.error(f"Erro inesperado ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
+        if not self.cursor:
+            logger.debug("Tentativa de verificar tabela sem um cursor ativo, retornando False.")
             return False
-
+        try:
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
+            return self.cursor.fetchone() is not None
+        except sqlite3.Error as e:
+            logger.error(f"Erro ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
+            return False
+        
+    # NOVO MÉTODO ADICIONADO
     def get_table_names(self) -> List[str]:
-        """
-        Retorna uma lista com os nomes de todas as tabelas no banco de dados.
-        """
-        query = "SELECT name FROM sqlite_master WHERE type='table';"
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query)
-                tables = [row[0] for row in cursor.fetchall()]
-            # Filtra tabelas internas do SQLite, se desejado (ex: 'sqlite_sequence')
-            tables = [table for table in tables if not table.startswith('sqlite_')]
-            logger.debug(f"Tabelas encontradas no banco de dados: {tables}")
-            return tables
-        except sqlite3.Error as e:
-            logger.error(f"Erro SQLite ao obter nomes das tabelas: {e}", exc_info=True)
+        """Retorna uma lista com os nomes de todas as tabelas no banco de dados."""
+        if self.cursor is None:
+            logger.error("Não é possível obter nomes de tabelas: Cursor não inicializado.")
             return []
-        except Exception as e:
-            logger.error(f"Erro inesperado ao obter nomes das tabelas: {e}", exc_info=True)
-            return []
-
-    def execute_query(self, query: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_all: bool = False):
-        """
-        Executa uma consulta SQL genérica.
-
-        Args:
-            query: A string da consulta SQL.
-            params: Tupla de parâmetros para a consulta (opcional).
-            fetch_one: Se True, retorna o primeiro resultado.
-            fetch_all: Se True, retorna todos os resultados.
-
-        Returns:
-            Resultado da consulta (dependendo de fetch_one/fetch_all) ou None.
-        """
-        logger.debug(f"Executando query: {query} com params: {params}")
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params or ())
-                conn.commit() # Commit para DML (INSERT, UPDATE, DELETE) ou DDL
-                
-                if fetch_one:
-                    return cursor.fetchone()
-                if fetch_all:
-                    return cursor.fetchall()
-                # Para INSERT, UPDATE, DELETE, pode-se retornar cursor.rowcount
-                if cursor.description is None: # Sem resultados para SELECT (ex: INSERT, UPDATE, DELETE)
-                    return cursor.rowcount 
-                return None # Por padrão, se não for fetch_one ou fetch_all
-
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            tables = self.cursor.fetchall()
+            return [table[0] for table in tables]
         except sqlite3.Error as e:
-            logger.error(f"Erro SQLite ao executar query '{query}': {e}", exc_info=True)
-            # Não propaga o erro aqui para permitir que o fluxo continue, mas loga.
-            # Dependendo do caso de uso, pode ser melhor propagar (raise).
-            return None 
-        except Exception as e:
-            logger.error(f"Erro inesperado ao executar query '{query}': {e}", exc_info=True)
-            return None
+            logger.error(f"Erro ao buscar nomes de tabelas: {e}", exc_info=True)
+            return []
+    
+    def _create_all_tables(self) -> None:
+        """Cria todas as tabelas necessárias para a aplicação, se não existirem."""
+        logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
+        
+        # Essenciais que vi nos logs ou são comuns
+        self._create_table_frequencia_absoluta()
+        self._create_table_frequencia_relativa()
+        self._create_table_atraso_atual()
+        self._create_table_atraso_maximo()
+        self._create_table_atraso_maximo_separado() # Para o step específico
+        self._create_table_atraso_medio()
+        self._create_table_pair_metrics() # Tabela para análise de pares
+        self._create_frequent_itemsets_table()
+
+        # Tabelas de Ciclo
+        self._create_table_ciclos_detalhe()
+        self._create_table_ciclos_sumario_estatisticas()
+        self._create_table_ciclo_progression()
+        self._create_table_ciclo_metric_frequency()
+        self._create_table_ciclo_metric_atraso_medio()
+        self._create_table_ciclo_metric_atraso_maximo()
+        self._create_table_ciclo_metric_atraso_final()
+        self._create_table_ciclo_rank_frequency()
+        self._create_table_ciclo_group_metrics()
+
+        # Outras tabelas
+        self._create_table_propriedades_numericas_por_concurso()
+        self._create_table_analise_repeticao_concurso_anterior()
+        
+        # Tabelas de Chunk (exemplos, você precisará de todas)
+        # self._create_table_evol_metric_frequency_linear_50() # Exemplo
+        # self._create_table_evol_block_group_metrics_linear_50() # Exemplo
+        # self._create_table_bloco_analises_consolidadas_linear_50() # Exemplo
+
+        # Tabelas de Rank Trend
+        # self._create_table_evol_rank_frequency_bloco_linear_50() # Exemplo
+        self._create_table_rank_geral_dezenas_por_frequencia()
+        
+        logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
+
+    # ----- Definições de Tabelas Específicas -----
+    def _create_frequent_itemsets_table(self) -> None:
+        query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
+
+    def _create_table_frequencia_absoluta(self):
+        query = "CREATE TABLE IF NOT EXISTS frequencia_absoluta (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Absoluta\" INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'frequencia_absoluta' OK.")
+
+    def _create_table_frequencia_relativa(self):
+        query = "CREATE TABLE IF NOT EXISTS frequencia_relativa (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Relativa\" REAL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'frequencia_relativa' OK.")
+
+    def _create_table_atraso_atual(self):
+        query = "CREATE TABLE IF NOT EXISTS atraso_atual (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Atual\" INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_atual' OK.")
+
+    def _create_table_atraso_maximo(self):
+        query = "CREATE TABLE IF NOT EXISTS atraso_maximo (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo' OK.")
+    
+    def _create_table_atraso_maximo_separado(self): # Tabela para o step separado
+        query = "CREATE TABLE IF NOT EXISTS atraso_maximo_separado (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo_separado' OK.")
+
+    def _create_table_atraso_medio(self):
+        query = "CREATE TABLE IF NOT EXISTS atraso_medio (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Medio\" REAL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_medio' OK.")
+        
+    def _create_table_pair_metrics(self):
+        query = "CREATE TABLE IF NOT EXISTS pair_metrics (pair_str TEXT PRIMARY KEY, frequency INTEGER, last_contest INTEGER, current_delay INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'pair_metrics' OK.")
+
+    def _create_table_ciclos_detalhe(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclos_detalhe (ciclo_num INTEGER, concurso_inicio INTEGER, concurso_fim INTEGER, duracao_concursos INTEGER, numeros_faltantes TEXT, qtd_faltantes INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_detalhe' OK.")
+
+    def _create_table_ciclos_sumario_estatisticas(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclos_sumario_estatisticas (total_ciclos_fechados INTEGER, duracao_media_ciclo REAL, duracao_min_ciclo INTEGER, duracao_max_ciclo INTEGER, duracao_mediana_ciclo REAL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_sumario_estatisticas' OK.")
+        
+    def _create_table_ciclo_progression(self):
+        query = """CREATE TABLE IF NOT EXISTS ciclo_progression (
+                    Concurso INTEGER, Data TEXT, ciclo_num_associado INTEGER, 
+                    dezenas_sorteadas_neste_concurso TEXT, 
+                    numeros_que_faltavam_antes_deste_concurso TEXT, 
+                    qtd_faltavam_antes_deste_concurso INTEGER, 
+                    dezenas_apuradas_neste_concurso TEXT, 
+                    qtd_apuradas_neste_concurso INTEGER, 
+                    numeros_faltantes_apos_este_concurso TEXT, 
+                    qtd_faltantes_apos_este_concurso INTEGER, 
+                    ciclo_fechou_neste_concurso INTEGER
+                 );"""
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_progression' OK.")
+
+    def _create_table_ciclo_metric_frequency(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_frequency' OK.")
+    
+    def _create_table_ciclo_metric_atraso_medio(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_medio (ciclo_num INTEGER, dezena INTEGER, atraso_medio_no_ciclo REAL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_medio' OK.")
+
+    def _create_table_ciclo_metric_atraso_maximo(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_maximo (ciclo_num INTEGER, dezena INTEGER, atraso_maximo_no_ciclo INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_maximo' OK.")
+
+    def _create_table_ciclo_metric_atraso_final(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_final (ciclo_num INTEGER, dezena INTEGER, atraso_final_no_ciclo INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_final' OK.")
+
+    def _create_table_ciclo_rank_frequency(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_rank_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, rank_freq_no_ciclo INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_rank_frequency' OK.")
+
+    def _create_table_ciclo_group_metrics(self):
+        query = "CREATE TABLE IF NOT EXISTS ciclo_group_metrics (ciclo_num INTEGER, avg_pares_no_ciclo REAL, avg_impares_no_ciclo REAL, avg_primos_no_ciclo REAL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_group_metrics' OK.")
+
+    def _create_table_propriedades_numericas_por_concurso(self):
+        query = "CREATE TABLE IF NOT EXISTS propriedades_numericas_por_concurso (\"Concurso\" INTEGER PRIMARY KEY, soma_dezenas INTEGER, pares INTEGER, impares INTEGER, primos INTEGER);" # Adicionar mais colunas de propriedades se existirem
+        self._execute_query(query, commit=True); logger.debug("Tabela 'propriedades_numericas_por_concurso' OK.")
+
+    def _create_table_analise_repeticao_concurso_anterior(self):
+        query = "CREATE TABLE IF NOT EXISTS analise_repeticao_concurso_anterior (\"Concurso\" INTEGER PRIMARY KEY, \"Data\" TEXT, \"QtdDezenasRepetidas\" INTEGER, \"DezenasRepetidas\" TEXT);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'analise_repeticao_concurso_anterior' OK.")
+    
+    def _create_table_rank_geral_dezenas_por_frequencia(self):
+        query = "CREATE TABLE IF NOT EXISTS rank_geral_dezenas_por_frequencia (Dezena INTEGER PRIMARY KEY, frequencia_total INTEGER, rank_geral INTEGER);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'rank_geral_dezenas_por_frequencia' OK.")
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    try:
+        # Este caminho é relativo ao local onde este script está. Ajuste se necessário.
+        # Para testes, é melhor usar um caminho absoluto ou um db em memória.
+        # db_m = DatabaseManager(db_path=':memory:')
+        db_m = DatabaseManager(db_path='../Data/test_lotofacil.db') # Exemplo
+        
+        # Teste rápido para verificar se a tabela foi criada
+        if db_m.table_exists('frequent_itemsets'):
+            logger.info("Teste: Tabela 'frequent_itemsets' existe.")
+        else:
+            logger.error("Teste: Tabela 'frequent_itemsets' NÃO existe (erro esperado se não foi criada em _create_all_tables).")
+        
+        # Teste do load_dataframe
+        # Criar uma tabela e dados de teste
+        test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
+        db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')
+        loaded_df = db_m.load_dataframe('test_table_load')
+        if loaded_df is not None and not loaded_df.empty:
+            logger.info(f"Teste load_dataframe: Carregado com sucesso. Conteúdo:\n{loaded_df}")
+        else:
+            logger.error("Teste load_dataframe: Falha ao carregar ou DataFrame vazio.")
+
+        df_non_existent = db_m.load_dataframe('tabela_nao_existe')
+        if df_non_existent is not None and df_non_existent.empty:
+            logger.info("Teste load_dataframe para tabela inexistente: Retornou DataFrame vazio como esperado.")
+        else:
+            logger.error(f"Teste load_dataframe para tabela inexistente: Inesperado. Retornou: {df_non_existent}")
+
+        db_m.close()
+    except Exception as e_test:
+        logger.error(f"Erro no exemplo de uso do DatabaseManager: {e_test}", exc_info=True)
+    finally:
+        # Limpar o arquivo de teste db se foi criado
+        if os.path.exists('../Data/test_lotofacil.db'):
+            os.remove('../Data/test_lotofacil.db')
+            logger.info("Arquivo test_lotofacil.db removido.")

@@ -1,28 +1,50 @@
-# src/pipeline_steps/execute_pairs.py
+# Lotofacil_Analysis/src/pipeline_steps/execute_pairs.py
 import pandas as pd
-import logging # Adicionado
-from src.analysis.combination_analysis import calculate_pair_frequencies # Supondo esta função para pares
-from src.database_manager import DatabaseManager
-# from src.config import logger # Removido
+import logging
+from typing import Any, Dict
 
-logger = logging.getLogger(__name__) # Corrigido
+# Para type hints mais específicos (opcional):
+# from src.analysis.combination_analysis import CombinationAnalyzer
+# from src.database_manager import DatabaseManager
+# from src.config import Config
 
-def run_pair_combination_analysis(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
-    """
-    Executa a análise de combinações de pares.
-    """
+logger = logging.getLogger(__name__)
+
+def run_pair_analysis_step(
+    all_data_df: pd.DataFrame, # CORRIGIDO para all_data_df
+    db_manager: Any, 
+    combination_analyzer: Any, 
+    config: Any, 
+    shared_context: Dict[str, Any],
+    **kwargs
+) -> bool:
+    step_name = "Pair Analysis"
+    logger.info(f"Iniciando etapa do pipeline: {step_name}")
+
     try:
-        logger.info("Iniciando análise de combinações de pares.")
+        drawn_numbers_col = config.DRAWN_NUMBERS_COLUMN_NAME
+        contest_id_col = config.CONTEST_ID_COLUMN_NAME
         
-        pair_freq_df = calculate_pair_frequencies(all_data_df) # Esta função deve vir de combination_analysis.py
-        if pair_freq_df is not None and not pair_freq_df.empty:
-            db_manager.save_dataframe_to_db(pair_freq_df, 'frequencia_pares')
-            logger.info("Frequência de pares salva no banco de dados.")
+        # O método analyze_pairs do CombinationAnalyzer espera 'all_draws_df'.
+        # Passamos nosso all_data_df para esse parâmetro.
+        pairs_df = combination_analyzer.analyze_pairs(
+            all_draws_df=all_data_df, 
+            drawn_numbers_col=drawn_numbers_col,
+            contest_id_col=contest_id_col
+        )
+        
+        if pairs_df is not None and not pairs_df.empty:
+            table_name = "pair_metrics" 
+            db_manager.save_dataframe(pairs_df, table_name, if_exists='replace')
+            logger.info(f"Métricas de pares salvas na tabela '{table_name}'.")
         else:
-            logger.warning("Não foi possível calcular ou DataFrame de frequência de pares vazio.")
+            logger.warning("Não foi possível calcular ou DataFrame de métricas de pares vazio.")
             
-        logger.info("Análise de combinações de pares concluída.")
+        logger.info(f"Etapa do pipeline: {step_name} concluída.")
         return True
+    except AttributeError as e:
+        logger.error(f"Erro na etapa {step_name} (verifique config ou combination_analyzer): {e}", exc_info=True)
+        return False
     except Exception as e:
-        logger.error(f"Erro na análise de combinações de pares: {e}", exc_info=True)
+        logger.error(f"Erro ao executar a etapa {step_name}: {e}", exc_info=True)
         return False

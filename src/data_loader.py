@@ -5,11 +5,13 @@ import logging
 
 # Importar as constantes de configuração relevantes
 from src.config import (
-    RAW_DATA_FILE_NAME,      # Usado para construir caminhos no main.py
+    RAW_DATA_FILE_NAME,
     CLEANED_DATA_FILE_NAME,
-    COLUMNS_TO_KEEP,         # Nomes das colunas originais no CSV a serem mantidas/processadas
-    NEW_COLUMN_NAMES,        # Novos nomes para estas colunas
-    BALL_NUMBER_COLUMNS      # Nomes das colunas das bolas após renomeação (ex: 'bola_1')
+    COLUMNS_TO_KEEP,
+    NEW_COLUMN_NAMES,
+    BALL_NUMBER_COLUMNS,
+    CONTEST_ID_COLUMN_NAME, # <<< ADICIONADO IMPORT
+    DATE_COLUMN_NAME # Para consistência com final_expected_cols
 )
 
 logger = logging.getLogger(__name__)
@@ -18,32 +20,19 @@ def load_and_clean_data(raw_file_path: str, cleaned_file_path_to_save: str) -> p
     """
     Carrega os dados brutos do arquivo CSV, realiza a limpeza e os transforma.
     Salva os dados limpos em formato pickle para carregamentos futuros mais rápidos.
-
-    Args:
-        raw_file_path: Caminho para o arquivo CSV de dados brutos.
-        cleaned_file_path_to_save: Caminho onde o DataFrame limpo será salvo (formato pickle).
-
-    Returns:
-        pd.DataFrame: DataFrame com os dados limpos e transformados.
-                     Retorna um DataFrame vazio em caso de erro.
     """
     try:
         logger.info(f"Iniciando carregamento e limpeza de dados de: {raw_file_path}")
         try:
-            # Assumindo que o separador e encoding podem variar.
-            # O seu arquivo 'historico.csv' usa ';' como delimitador.
             df = pd.read_csv(raw_file_path, sep=';', encoding='utf-8', header=0)
             logger.info(f"Dados carregados com sucesso de CSV (UTF-8): {raw_file_path}")
         except UnicodeDecodeError:
             logger.warning(f"Falha ao decodificar {raw_file_path} com UTF-8. Tentando com ISO-8859-1.")
             df = pd.read_csv(raw_file_path, sep=';', encoding='iso-8859-1', header=0)
             logger.info(f"Dados carregados com sucesso de CSV (ISO-8859-1): {raw_file_path}")
-        # Removido o fallback para Excel, pois EXCEL_FILE_PATH não está em config.py
-        # e o foco é no arquivo CSV especificado por raw_file_path.
 
         logger.debug(f"Colunas originais do CSV: {df.columns.tolist()}")
         
-        # Verifica se as colunas definidas em COLUMNS_TO_KEEP existem no DataFrame carregado
         actual_columns_to_keep_from_config = [col for col in COLUMNS_TO_KEEP if col in df.columns]
         
         if len(actual_columns_to_keep_from_config) != len(COLUMNS_TO_KEEP):
@@ -53,57 +42,77 @@ def load_and_clean_data(raw_file_path: str, cleaned_file_path_to_save: str) -> p
                 logger.error(f"Nenhuma coluna de COLUMNS_TO_KEEP ({COLUMNS_TO_KEEP}) encontrada no arquivo. Verifique a configuração e o arquivo de dados.")
                 return pd.DataFrame()
         
-        # Seleciona apenas as colunas que existem e estavam em COLUMNS_TO_KEEP
         df_processed = df[actual_columns_to_keep_from_config].copy()
 
-        # Renomeia as colunas selecionadas
-        # Garante que NEW_COLUMN_NAMES tenha o mesmo número de elementos que as colunas efetivamente mantidas
         current_col_names = df_processed.columns.tolist()
-        rename_map = dict(zip(current_col_names, NEW_COLUMN_NAMES[:len(current_col_names)]))
+        # Garante que NEW_COLUMN_NAMES tenha o tamanho certo para o zip
+        effective_new_column_names = NEW_COLUMN_NAMES[:len(current_col_names)]
+        rename_map = dict(zip(current_col_names, effective_new_column_names))
         df_processed.rename(columns=rename_map, inplace=True)
         logger.debug(f"Colunas renomeadas para: {df_processed.columns.tolist()}")
 
-        # Processamento de data e colunas de bolas
-        if 'Data Sorteio' in df_processed.columns:
-            df_processed['Data'] = pd.to_datetime(df_processed['Data Sorteio'], format='%d/%m/%Y', errors='coerce')
-            df_processed.drop(columns=['Data Sorteio'], inplace=True) # Remove a original
-            df_processed.dropna(subset=['Data'], inplace=True) # Remove linhas onde a data é inválida
-        else:
-            logger.warning("Coluna 'Data Sorteio' não encontrada para conversão. Verifique COLUMNS_TO_KEEP e NEW_COLUMN_NAMES.")
+        # A lógica original do seu data_loader verifica por 'Data Sorteio' APÓS a renomeação.
+        # Isso implica que 'Data Sorteio' não deve ser renomeada agressivamente por NEW_COLUMN_NAMES
+        # se esta lógica for para funcionar como está.
+        # Se NEW_COLUMN_NAMES[1] (correspondente a COLUMNS_TO_KEEP[1] == 'Data Sorteio')
+        # for, por exemplo, 'draw_date_str', então a verificação abaixo deveria ser
+        # if 'draw_date_str' in df_processed.columns:
+        # Para o config.py que forneci, NEW_COLUMN_NAMES[1] é 'Data Sorteio'.
+        
+        date_column_after_rename = None
+        if COLUMNS_TO_KEEP[1] == 'Data Sorteio': # Assumindo que a segunda coluna em COLUMNS_TO_KEEP é a data
+            date_column_after_rename = NEW_COLUMN_NAMES[1] # Este é o nome da coluna de data após a renomeação
 
-        for ball_col_name in BALL_NUMBER_COLUMNS: # BALL_NUMBER_COLUMNS são os nomes FINAIS (ex: 'bola_1')
+        if date_column_after_rename and date_column_after_rename in df_processed.columns:
+            # DATE_COLUMN_NAME é o nome final da coluna de data ('date' por default)
+            df_processed[DATE_COLUMN_NAME] = pd.to_datetime(df_processed[date_column_after_rename], format='%d/%m/%Y', errors='coerce')
+            if date_column_after_rename != DATE_COLUMN_NAME: # Só dropa se o nome for diferente do nome final
+                df_processed.drop(columns=[date_column_after_rename], inplace=True)
+            df_processed.dropna(subset=[DATE_COLUMN_NAME], inplace=True)
+        else:
+            logger.warning(f"Coluna de data ('{date_column_after_rename}') não encontrada após renomeação para conversão. Verifique COLUMNS_TO_KEEP e NEW_COLUMN_NAMES.")
+
+        for ball_col_name in BALL_NUMBER_COLUMNS:
             if ball_col_name in df_processed.columns:
                 df_processed[ball_col_name] = pd.to_numeric(df_processed[ball_col_name], errors='coerce')
             else:
                 logger.warning(f"Coluna de bola esperada '{ball_col_name}' não encontrada após renomeação.")
         
-        # Remove linhas onde alguma bola é NaN (problema no dado original ou conversão)
-        # Verifica se todas as colunas de bolas existem antes de tentar o dropna nelas
         existing_ball_cols_for_dropna = [col for col in BALL_NUMBER_COLUMNS if col in df_processed.columns]
         if existing_ball_cols_for_dropna:
             df_processed.dropna(subset=existing_ball_cols_for_dropna, inplace=True)
-            # Converte para inteiro
             for ball_col_name in existing_ball_cols_for_dropna:
                  df_processed[ball_col_name] = df_processed[ball_col_name].astype(int)
         else:
             logger.warning("Nenhuma coluna de bola encontrada para verificar NaNs ou converter para inteiro.")
 
-
-        # Garantir as colunas finais e sua ordem
-        # O código em `chunk_analysis.py` espera 'Concurso' e 'bola_1'...'bola_15', 'Data'.
-        final_expected_cols = ['Concurso', 'Data'] + BALL_NUMBER_COLUMNS
+        # --- CORREÇÃO AQUI para essential_cols e final_expected_cols ---
+        # Usar os nomes de colunas FINAIS padronizados do config.py
+        final_expected_cols = [CONTEST_ID_COLUMN_NAME, DATE_COLUMN_NAME] + BALL_NUMBER_COLUMNS
         
-        # Selecionar apenas as colunas esperadas que realmente existem no DataFrame
         cols_to_select_final = [col for col in final_expected_cols if col in df_processed.columns]
         
-        # Verificar se as colunas essenciais estão presentes
-        essential_cols = ['Concurso'] + BALL_NUMBER_COLUMNS
+        essential_cols = [CONTEST_ID_COLUMN_NAME] + BALL_NUMBER_COLUMNS # Colunas essenciais após toda a renomeação
+        # --- FIM DA CORREÇÃO ---
+        
         missing_essential_cols = [col for col in essential_cols if col not in df_processed.columns]
         if missing_essential_cols:
             logger.error(f"Colunas essenciais estão faltando após o processamento: {missing_essential_cols}. Verifique a configuração e os dados.")
+            logger.debug(f"Colunas disponíveis em df_processed: {df_processed.columns.tolist()}")
             return pd.DataFrame()
             
-        df_final = df_processed[cols_to_select_final]
+        df_final = df_processed[cols_to_select_final].copy() # Usar .copy() para evitar SettingWithCopyWarning
+
+        # Adicionar a coluna 'drawn_numbers' (lista de dezenas) que muitas análises podem esperar
+        # Esta coluna não estava sendo criada no seu data_loader.py, mas é um padrão útil.
+        # As análises que forneci (como combination_analysis) esperam esta coluna.
+        # Se você não a quiser, as análises precisarão ser ajustadas para ler de 'ball_1'...'ball_15'.
+        try:
+            df_final['drawn_numbers'] = df_final[BALL_NUMBER_COLUMNS].apply(lambda row: sorted([int(num) for num in row if pd.notna(num)]), axis=1)
+            logger.info("Coluna 'drawn_numbers' (lista de dezenas) criada.")
+        except Exception as e_drawn:
+            logger.warning(f"Não foi possível criar a coluna 'drawn_numbers': {e_drawn}")
+
 
         df_final.to_pickle(cleaned_file_path_to_save)
         logger.info(f"Dados limpos e transformados ({len(df_final)} linhas) salvos em: {cleaned_file_path_to_save}")
@@ -120,17 +129,8 @@ def load_and_clean_data(raw_file_path: str, cleaned_file_path_to_save: str) -> p
 def load_cleaned_data(data_dir_path: str) -> pd.DataFrame:
     """
     Carrega os dados limpos de um arquivo pickle.
-
-    Args:
-        data_dir_path: Caminho para o diretório que contém o arquivo de dados limpos.
-                       O nome do arquivo é obtido de CLEANED_DATA_FILE_NAME em config.py.
-
-    Returns:
-        pd.DataFrame: DataFrame com os dados limpos.
-                     Retorna um DataFrame vazio se o arquivo não for encontrado ou em caso de erro.
     """
-    # CLEANED_DATA_FILE_NAME é apenas o nome do arquivo, data_dir_path é o diretório
-    cleaned_file_path = Path(data_dir_path) / CLEANED_DATA_FILE_NAME
+    cleaned_file_path = Path(data_dir_path) / CLEANED_DATA_FILE_NAME # CLEANED_DATA_FILE_NAME é importado do config
     try:
         logger.info(f"Carregando dados limpos de: {cleaned_file_path}")
         df = pd.read_pickle(cleaned_file_path)

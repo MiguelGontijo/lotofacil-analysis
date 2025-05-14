@@ -1,29 +1,32 @@
 # src/pipeline_steps/execute_max_delay.py
 import pandas as pd
-import logging # Adicionado
-from src.analysis.delay_analysis import calculate_max_delay # Supondo que esta função existe em delay_analysis.py
-from src.database_manager import DatabaseManager
-# from src.config import logger # Removido
+import logging
+from typing import Any, Dict # Adicionado
+from src.analysis.delay_analysis import calculate_max_delay
+# from src.database_manager import DatabaseManager # Para type hint
+# from src.config import Config # Para type hint
 
-logger = logging.getLogger(__name__) # Corrigido
+logger = logging.getLogger(__name__)
 
-def run_max_delay_analysis_step(all_data_df: pd.DataFrame, db_manager: DatabaseManager, **kwargs) -> bool:
-    """
-    Executa a análise de atraso máximo e salva o resultado.
-    Nomeado _step para evitar conflito se houver outra função com nome similar.
-    """
+def run_max_delay_analysis_step(
+    all_data_df: pd.DataFrame, 
+    db_manager: Any, # DatabaseManager
+    config: Any, # Config
+    shared_context: Dict[str, Any], # Adicionado
+    **kwargs
+) -> bool:
+    step_name = "Max Delay Analysis (Separate)"
+    logger.info(f"Iniciando etapa: {step_name}.")
     try:
-        logger.info("Iniciando análise de atraso máximo (etapa separada).")
-        
-        max_delay_df = calculate_max_delay(all_data_df)
+        max_delay_df = calculate_max_delay(all_data_df, config) # Passa config
         if max_delay_df is not None and not max_delay_df.empty:
-            db_manager.save_dataframe_to_db(max_delay_df, 'atraso_maximo_separado') # Nome de tabela diferente para evitar conflito se calculado em run_delay_analysis
-            logger.info("Atraso máximo (etapa separada) salvo no banco de dados.")
+            db_manager.save_dataframe(max_delay_df, 'atraso_maximo_separado', if_exists='replace')
+            logger.info(f"Atraso máximo (etapa separada) salvo na tabela 'atraso_maximo_separado'.")
         else:
-            logger.warning("Não foi possível calcular ou DataFrame de atraso máximo (etapa separada) vazio.")
+            logger.warning(f"Não foi possível calcular ou DataFrame de atraso máximo (etapa separada) vazio.")
             
-        logger.info("Análise de atraso máximo (etapa separada) concluída.")
+        logger.info(f"Etapa: {step_name} concluída.")
         return True
     except Exception as e:
-        logger.error(f"Erro na análise de atraso máximo (etapa separada): {e}", exc_info=True)
+        logger.error(f"Erro na etapa {step_name}: {e}", exc_info=True)
         return False
