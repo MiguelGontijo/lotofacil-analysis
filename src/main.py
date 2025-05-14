@@ -23,7 +23,7 @@ for handler in current_handlers:
     logging.root.removeHandler(handler)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO, 
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(log_file_path, mode='a'),
@@ -36,46 +36,19 @@ ANALYSIS_PIPELINE = [
     {"name": "frequency-analysis", "func": ps.run_frequency_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "delay-analysis", "func": ps.run_delay_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "number-properties-analysis", "func": ps.run_number_properties_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {"name": "repetition-analysis", "func": ps.run_repetition_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    # Atualizando para a função real de repetition_analysis
+    {"name": "repetition-analysis", "func": ps.run_repetition_analysis_step, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # <<< MODIFICADO
     {"name": "pair-combination-analysis", "func": ps.run_pair_combination_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    
     {"name": "cycle-identification-stats", "func": ps.run_cycle_identification_and_stats, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "cycle-progression", "func": ps.run_cycle_progression_analysis_step, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    # NOVA ETAPA DE MÉTRICAS DETALHADAS POR CICLO - depende de 'ciclos_detalhe' e 'all_data_df'
-    {"name": "detailed-cycle-metrics", "func": ps.run_detailed_cycle_metrics_step, "args": ["all_data_df", "db_manager"], "kwargs": {}}, # <<< ADICIONADO
+    {"name": "detailed-cycle-metrics", "func": ps.run_detailed_cycle_metrics_step, "args": ["all_data_df", "db_manager"], "kwargs": {}},
     {"name": "cycle-closing-analysis", "func": ps.run_cycle_closing_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}}, 
-    
     {"name": "group-trend-analysis", "func": ps.run_group_trend_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
-    {
-        "name": "chunk-evol-analysis", 
-        "func": ps.run_chunk_evolution_analysis,
-        "args": ["all_data_df", "db_manager"],
-        "kwargs": {}
-    },
-    {
-        "name": "rank-trend-analysis", 
-        "func": ps.run_rank_trend_analysis_step, 
-        "args": ["db_manager"], 
-        "kwargs": {}
-    },
-    {
-        "name": "block-aggregator", 
-        "func": ps.run_block_aggregation_step,
-        "args": ["db_manager"], 
-        "kwargs": {}
-    },
-    {
-        "name": "chunk-evol-viz",
-        "func": ps.run_chunk_evolution_visualization,
-        "args": ["db_manager"],
-        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}
-    },
-    {
-        "name": "core-metrics-viz",
-        "func": ps.run_core_metrics_visualization,
-        "args": ["db_manager"],
-        "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}
-    },
+    {"name": "chunk-evol-analysis", "func": ps.run_chunk_evolution_analysis, "args": ["all_data_df", "db_manager"], "kwargs": {}},
+    {"name": "rank-trend-analysis", "func": ps.run_rank_trend_analysis_step, "args": ["db_manager"], "kwargs": {}},
+    {"name": "block-aggregator", "func": ps.run_block_aggregation_step, "args": ["db_manager"], "kwargs": {}},
+    {"name": "chunk-evol-viz", "func": ps.run_chunk_evolution_visualization, "args": ["db_manager"], "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}},
+    {"name": "core-metrics-viz", "func": ps.run_core_metrics_visualization, "args": ["db_manager"], "kwargs": {"output_dir_from_pipeline": PLOT_DIR_CONFIG}},
 ]
 
 def run_orchestrator_process(
@@ -84,73 +57,37 @@ def run_orchestrator_process(
 ):
     # ... (código da função run_orchestrator_process mantido como na versão anterior) ...
     logger.info("Iniciando o processo de análise da Lotofácil.")
-    raw_data_filepath = DATA_DIR / RAW_DATA_FILE_NAME
-    cleaned_data_filepath = DATA_DIR / CLEANED_DATA_FILE_NAME
-    db_filepath = DATA_DIR / DB_FILE_NAME
+    raw_data_filepath = DATA_DIR / RAW_DATA_FILE_NAME; cleaned_data_filepath = DATA_DIR / CLEANED_DATA_FILE_NAME; db_filepath = DATA_DIR / DB_FILE_NAME
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db_manager = DatabaseManager(db_path=str(db_filepath))
     all_data_df = None
     if not force_reload_data and cleaned_data_filepath.exists():
-        logger.info(f"Carregando dados limpos de: {cleaned_data_filepath}")
         all_data_df = load_cleaned_data(data_dir_path=str(DATA_DIR))
     else:
-        logger.info(f"Arquivo de dados limpos '{CLEANED_DATA_FILE_NAME}' não encontrado em '{DATA_DIR}' ou recarregamento forçado.")
-        logger.info(f"Processando dados brutos de: {raw_data_filepath}")
-        if raw_data_filepath.exists():
-            all_data_df = load_and_clean_data(
-                raw_file_path=str(raw_data_filepath), 
-                cleaned_file_path_to_save=str(cleaned_data_filepath) 
-            )
-        else:
-            logger.error(f"Arquivo de dados brutos '{RAW_DATA_FILE_NAME}' não encontrado em: {raw_data_filepath}. Encerrando.")
-            return
-    if all_data_df is None or all_data_df.empty:
-        logger.error("Não foi possível carregar ou processar os dados da Lotofácil. Encerrando.")
-        return
+        if raw_data_filepath.exists(): all_data_df = load_and_clean_data(raw_file_path=str(raw_data_filepath), cleaned_file_path_to_save=str(cleaned_data_filepath))
+        else: logger.error(f"Arquivo de dados brutos '{RAW_DATA_FILE_NAME}' não encontrado. Encerrando."); return
+    if all_data_df is None or all_data_df.empty: logger.error("Não foi possível carregar os dados. Encerrando."); return
     pipeline_to_run = ANALYSIS_PIPELINE
     if selected_analyses:
         logger.info(f"Executando análises selecionadas: {selected_analyses}")
         temp_pipeline = [step for step in ANALYSIS_PIPELINE if step["name"] in selected_analyses]
         if temp_pipeline:
-            name_to_step = {step["name"]: step for step in temp_pipeline}
-            ordered_pipeline = []
+            name_to_step = {step["name"]: step for step in temp_pipeline}; ordered_pipeline = []
             processed_names = set()
             for name in selected_analyses:
-                if name in name_to_step and name not in processed_names:
-                    ordered_pipeline.append(name_to_step[name])
-                    processed_names.add(name)
+                if name in name_to_step and name not in processed_names: ordered_pipeline.append(name_to_step[name]); processed_names.add(name)
             pipeline_to_run = ordered_pipeline
-        else:
-             pipeline_to_run = temp_pipeline
-        if not pipeline_to_run:
-            logger.warning(f"Nenhuma das análises selecionadas ({selected_analyses}) foi encontrada. Nenhuma etapa será executada.")
-        else:
-            logger.info(f"Etapas a serem executadas nesta ordem: {[step['name'] for step in pipeline_to_run]}")
+        else: pipeline_to_run = temp_pipeline
+        if not pipeline_to_run: logger.warning(f"Nenhuma análise selecionada ({selected_analyses}) encontrada. Nenhuma etapa será executada.")
+        else: logger.info(f"Etapas a serem executadas: {[step['name'] for step in pipeline_to_run]}")
     orchestrator = Orchestrator(pipeline=pipeline_to_run, db_manager=db_manager)
-    orchestrator.set_shared_context("all_data_df", all_data_df)
-    orchestrator.set_shared_context("db_manager", db_manager)
-    orchestrator.set_shared_context("plot_dir_context", PLOT_DIR_CONFIG)
-    if not pipeline_to_run:
-        logger.info("Pipeline vazio. Encerrando processo de orquestração.")
-        return
-    logger.info("Executando o pipeline de análise...")
-    orchestrator.run()
-    logger.info("Pipeline de análise concluído.")
+    orchestrator.set_shared_context("all_data_df", all_data_df); orchestrator.set_shared_context("db_manager", db_manager); orchestrator.set_shared_context("plot_dir_context", PLOT_DIR_CONFIG)
+    if not pipeline_to_run: logger.info("Pipeline vazio. Encerrando."); return
+    logger.info("Executando o pipeline de análise..."); orchestrator.run(); logger.info("Pipeline de análise concluído.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Executa o pipeline de análise da Lotofácil.")
-    parser.add_argument(
-        "--analysis",
-        nargs='+',
-        help="Slug(s) da(s) análise(s) específica(s) a serem executadas."
-    )
-    parser.add_argument(
-        "--force-reload",
-        action="store_true",
-        help="Força o recarregamento e limpeza dos dados brutos."
-    )
+    parser.add_argument("--analysis", nargs='+', help="Slug(s) da(s) análise(s) a executar.")
+    parser.add_argument("--force-reload", action="store_true", help="Força recarregamento dos dados.")
     args = parser.parse_args()
-    run_orchestrator_process(
-        force_reload_data=args.force_reload,
-        selected_analyses=args.analysis
-    )
+    run_orchestrator_process(force_reload_data=args.force_reload, selected_analyses=args.analysis)
