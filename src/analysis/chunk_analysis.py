@@ -3,7 +3,7 @@ import pandas as pd
 from typing import List, Dict, Tuple, Any, Set, Optional
 import logging
 import numpy as np
-import math # <<< GARANTIDO QUE ESTEJA PRESENTE
+import math
 
 # Importa de number_properties_analysis DENTRO da função para evitar import circular
 # from src.analysis.number_properties_analysis import analyze_draw_properties
@@ -20,19 +20,19 @@ def get_chunk_definitions(total_contests: int, chunk_type_from_config: str, chun
             logger.warning(f"Tamanho de chunk inválido: {sz_item} para o tipo {chunk_type_from_config}. Pulando.")
             continue
         current_pos = 0
-        # seq_id_counter = 1 # Removido pois não estava sendo usado para construir 'definitions'
+
         while current_pos < total_contests:
             start_contest = current_pos + 1 
             end_contest = min(current_pos + sz_item, total_contests)
+            # Se o chunk resultante for menor que o tamanho do chunk (acontece no final)
+            # e você quiser apenas chunks completos, adicione uma verificação aqui:
+            # if (end_contest - start_contest + 1) < sz_item:
+            #     break 
             definitions.append((start_contest, end_contest, f"{chunk_type_from_config}_{sz_item}")) 
-            current_pos = end_contest # Para chunks não sobrepostos
-            # Se end_contest < start_contest (ex: sz_item muito pequeno e current_pos perto de total_contests)
-            # ou se o chunk for menor que o esperado, o próximo current_pos pode precisar de ajuste
-            # mas min(current_pos + sz_item, total_contests) deve lidar com bordas.
-            if start_contest > end_contest : # Evita loop infinito se algo der errado
+            current_pos = end_contest 
+            if start_contest > end_contest : 
                 logger.warning(f"Condição de chunk inválida start_contest > end_contest ({start_contest} > {end_contest}). Interrompendo para este tamanho.")
                 break
-            # seq_id_counter +=1 # Removido pois não estava sendo usado para construir 'definitions'
     logger.debug(f"Definições de chunk para tipo='{chunk_type_from_config}', tamanhos={chunk_sizes_from_config}: {len(definitions)} blocos gerados.")
     return definitions
 
@@ -60,7 +60,6 @@ def calculate_frequency_in_chunk(df_chunk: pd.DataFrame, config: Any) -> pd.Seri
     return frequency_series.astype(int)
 
 def get_draw_matrix_for_chunk(df_chunk: pd.DataFrame, chunk_start_contest: int, chunk_end_contest: int, config: Any) -> pd.DataFrame:
-    # Define o índice com TODOS os concursos no range do chunk, mesmo que não haja dados para eles
     all_contests_in_chunk_range = pd.Index(range(chunk_start_contest, chunk_end_contest + 1), name=config.CONTEST_ID_COLUMN_NAME)
     
     if df_chunk.empty:
@@ -109,12 +108,12 @@ def get_draw_matrix_for_chunk(df_chunk: pd.DataFrame, chunk_start_contest: int, 
     return draw_matrix.astype(int)
 
 def calculate_delays_for_matrix(draw_matrix: pd.DataFrame, chunk_start_contest: int, chunk_end_contest: int, config: Any) -> Dict[str, pd.Series]:
-    chunk_duration = chunk_end_contest - chunk_start_contest + 1 
+    chunk_duration_calc = chunk_end_contest - chunk_start_contest + 1 # Usar esta variável localmente
     results: Dict[str, pd.Series] = {
-        "final": pd.Series(chunk_duration, index=config.ALL_NUMBERS, dtype='Int64', name="atraso_final_no_bloco"),
+        "final": pd.Series(chunk_duration_calc, index=config.ALL_NUMBERS, dtype='Int64', name="atraso_final_no_bloco"),
         "mean": pd.Series(np.nan, index=config.ALL_NUMBERS, dtype='float', name="atraso_medio_no_bloco"), 
-        "max": pd.Series(chunk_duration, index=config.ALL_NUMBERS, dtype='Int64', name="atraso_maximo_no_bloco"),
-        "std_dev": pd.Series(np.nan, index=config.ALL_NUMBERS, dtype='float', name="atraso_std_dev_no_bloco") # <<< ADIÇÃO DA CHAVE "std_dev"
+        "max": pd.Series(chunk_duration_calc, index=config.ALL_NUMBERS, dtype='Int64', name="atraso_maximo_no_bloco"),
+        "std_dev": pd.Series(np.nan, index=config.ALL_NUMBERS, dtype='float', name="atraso_std_dev_no_bloco")
     }
     if draw_matrix.empty: 
         logger.debug(f"Matriz de sorteios vazia para cálculo de atrasos em C{chunk_start_contest}-C{chunk_end_contest}.")
@@ -139,8 +138,8 @@ def calculate_delays_for_matrix(draw_matrix: pd.DataFrame, chunk_start_contest: 
         occurrence_contests = col_dezena[col_dezena == 1].index.sort_values().tolist()
         
         if not occurrence_contests: 
-            # results["final"], results["max"], results["mean"], results["std_dev"] já estão com os valores default/NaN
-            continue # Próxima dezena
+            # Os valores default já foram setados na inicialização de `results`
+            continue
         
         results["final"].loc[dezena_val] = chunk_end_contest - occurrence_contests[-1]
         
@@ -149,7 +148,7 @@ def calculate_delays_for_matrix(draw_matrix: pd.DataFrame, chunk_start_contest: 
         gaps.append(occurrence_contests[0] - chunk_start_contest)
         
         for i in range(len(occurrence_contests) - 1):
-            gaps.append(occurrence_contests[i+1] - occurrence_contests[i] - 1) # Gaps entre ocorrências
+            gaps.append(occurrence_contests[i+1] - occurrence_contests[i] - 1) 
             
         # Gap final: da última ocorrência DENTRO do chunk até a borda final do chunk
         gaps.append(chunk_end_contest - occurrence_contests[-1])
@@ -157,22 +156,20 @@ def calculate_delays_for_matrix(draw_matrix: pd.DataFrame, chunk_start_contest: 
         if gaps: 
             results["mean"].loc[dezena_val] = np.mean(gaps)
             results["max"].loc[dezena_val] = max(gaps)
-            # <<< BLOCO ADICIONADO/MODIFICADO PARA CÁLCULO DE STD_DEV DE ATRASOS >>>
-            # pd.Series.std() é mais robusto para listas pequenas (retorna NaN se < 2 elementos com ddof=1)
             current_delay_std = pd.Series(gaps).std(ddof=1) 
-            results["std_dev"].loc[dezena_val] = current_delay_std # Já lida com NaN
-            # <<< FIM DO BLOCO ADICIONADO/MODIFICADO >>>
-        else: # Caso de única ocorrência em todos os sorteios (gaps lista vazia não acontece com a lógica atual de gaps)
-              # ou ocorrências sem gaps internos (e.g. aparece, depois aparece no seguinte)
-              # Se gaps ficou vazia por algum motivo (não deveria com a lógica atual), std será NaN
-            results["mean"].loc[dezena_val] = 0.0 # Se só ocorreu uma vez, média de gaps pode ser 0.
-            results["max"].loc[dezena_val] = max(0, chunk_duration -1) if chunk_duration >0 else 0
-            results["std_dev"].loc[dezena_val] = np.nan # Se não há variabilidade de gaps
+            results["std_dev"].loc[dezena_val] = current_delay_std # pd.Series.std() já retorna NaN se apropriado
+        else: 
+            # Este caso (gaps vazio) não deve ocorrer se occurrence_contests não for vazio
+            # devido à forma como os gaps são calculados (incluindo gaps das bordas).
+            # Mas, por segurança, se ocorrer:
+            results["mean"].loc[dezena_val] = np.nan 
+            results["max"].loc[dezena_val] = chunk_duration_calc # Atraso máximo é a duração se não houve gaps internos (ou só uma ocorrência)
+            results["std_dev"].loc[dezena_val] = np.nan
             
     return results
 
 def calculate_block_group_summary_metrics(df_chunk: pd.DataFrame, config: Any) -> Dict[str, Optional[float]]:
-    from src.analysis.number_properties_analysis import analyze_draw_properties # Importa aqui
+    from src.analysis.number_properties_analysis import analyze_draw_properties 
 
     summary_metrics: Dict[str, Optional[float]] = { "avg_pares_no_bloco": None, "avg_impares_no_bloco": None, "avg_primos_no_bloco": None }
     if df_chunk.empty: return summary_metrics
@@ -184,26 +181,26 @@ def calculate_block_group_summary_metrics(df_chunk: pd.DataFrame, config: Any) -
     contest_properties_list: List[Dict[str, Any]] = []
     for _, row in df_chunk.iterrows():
         try:
-            # Garante que apenas colunas de bola sejam usadas e convertidas
-            draw_numbers_str = [row[col] for col in actual_ball_cols if pd.notna(row[col])]
-            draw = [int(d) for d in draw_numbers_str] # Converte para int aqui
+            draw_numbers_str_list = [row[col] for col in actual_ball_cols if pd.notna(row[col])] # Coleta como string ou num
+            draw = [int(d_num) for d_num in draw_numbers_str_list] # Converte para int
             
-            if len(draw) == config.NUMBERS_PER_DRAW: # Verifica se temos o número esperado de dezenas
+            if len(draw) == config.NUMBERS_PER_DRAW: 
                 properties = analyze_draw_properties(draw, config) 
                 contest_properties_list.append(properties)
-        except ValueError as e: 
-            logger.warning(f"Erro ao converter dezenas para o concurso {row.get(config.CONTEST_ID_COLUMN_NAME, 'Desconhecido')} para métricas de grupo: {e}. Linha: {row.to_dict()}. Dezenas: {draw_numbers_str if 'draw_numbers_str' in locals() else 'N/A'}")
+        except ValueError as e_val: 
+            logger.warning(f"Erro ao converter dezenas para o concurso {row.get(config.CONTEST_ID_COLUMN_NAME, 'Desconhecido')} para métricas de grupo: {e_val}. Dezenas: {draw_numbers_str_list if 'draw_numbers_str_list' in locals() else 'N/A'}")
             continue
+        except Exception as e_gen: # Captura outras exceções inesperadas
+             logger.error(f"Erro inesperado em calculate_block_group_summary_metrics para concurso {row.get(config.CONTEST_ID_COLUMN_NAME, 'Desconhecido')}: {e_gen}")
+             continue
             
     if not contest_properties_list: return summary_metrics
     df_contest_properties = pd.DataFrame(contest_properties_list)
     
-    # Calcula médias apenas se a coluna existir e não estiver vazia
-    for group_col_name in ['pares', 'impares', 'primos']: # Adicione outras colunas de grupo aqui se necessário
-        db_col_name = f"avg_{group_col_name}_no_bloco"
-        if group_col_name in df_contest_properties.columns and not df_contest_properties[group_col_name].empty:
-            summary_metrics[db_col_name] = df_contest_properties[group_col_name].mean()
-        # else: summary_metrics[db_col_name] já é None
+    for group_col_name_prop in ['pares', 'impares', 'primos']: 
+        db_col_name_avg = f"avg_{group_col_name_prop}_no_bloco"
+        if group_col_name_prop in df_contest_properties.columns and not df_contest_properties[group_col_name_prop].empty:
+            summary_metrics[db_col_name_avg] = df_contest_properties[group_col_name_prop].mean()
             
     return summary_metrics
 
@@ -220,7 +217,7 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: A
         df_to_process[contest_col] = df_to_process[contest_col].astype(int)
         if df_to_process.empty: 
             logger.error("DataFrame vazio após limpar coluna de concurso em calculate_chunk_metrics_and_persist."); return
-        total_contests = df_to_process[contest_col].max() # Garante que é int
+        total_contests = df_to_process[contest_col].max() 
     except Exception as e_conv: 
         logger.error(f"Erro ao processar coluna '{contest_col}' em calculate_chunk_metrics_and_persist: {e_conv}"); return
 
@@ -230,7 +227,7 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: A
     for chunk_type, list_of_sizes in config.CHUNK_TYPES_CONFIG.items():
         for size_val in list_of_sizes:
             logger.info(f"Processando chunks: tipo='{chunk_type}', tamanho={size_val}.")
-            chunk_definitions = get_chunk_definitions(int(total_contests), chunk_type, [size_val], config) # Garante int
+            chunk_definitions = get_chunk_definitions(int(total_contests), chunk_type, [size_val], config) 
             if not chunk_definitions: 
                 logger.warning(f"Nenhuma definição de chunk para {chunk_type}_{size_val}."); continue
 
@@ -242,38 +239,41 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: A
                 mask = (df_to_process[contest_col] >= start_contest) & (df_to_process[contest_col] <= end_contest)
                 df_current_chunk = df_to_process[mask]
 
-                if df_current_chunk.empty: # Adicionado para pular chunks vazios que podem surgir
+                if df_current_chunk.empty: 
                     logger.debug(f"Chunk C{start_contest}-C{end_contest} (SeqID {chunk_seq_id}) está vazio. Pulando.")
                     continue
+                
+                # Define a duração do chunk aqui para uso nos defaults
+                chunk_actual_duration = end_contest - start_contest + 1
 
                 frequency_series = calculate_frequency_in_chunk(df_current_chunk, config)
                 draw_matrix_chunk = get_draw_matrix_for_chunk(df_current_chunk, start_contest, end_contest, config)
                 delay_metrics_dict = calculate_delays_for_matrix(draw_matrix_chunk, start_contest, end_contest, config) 
                 
                 for dezena_val in config.ALL_NUMBERS:
-                    # <<< BLOCO ADICIONADO PARA CÁLCULO DE OCCURRENCE_STD_DEV >>>
                     frequencia_abs_dezena = frequency_series.get(dezena_val, 0)
-                    # num_draws_no_chunk = len(df_current_chunk) # Se df_current_chunk puder ter buracos
-                    num_draws_no_chunk = end_contest - start_contest + 1 # Duração total do chunk
+                    # Usar a duração real do chunk para freq_rel é mais consistente
+                    # num_draws_no_chunk_calc = len(df_current_chunk) # se os dados puderem ter buracos
+                    num_draws_no_chunk_calc = chunk_actual_duration 
                     
                     freq_rel_dezena = 0.0
-                    if num_draws_no_chunk > 0: # Evita divisão por zero se chunk for de tamanho 0
-                        freq_rel_dezena = frequencia_abs_dezena / num_draws_no_chunk
+                    if num_draws_no_chunk_calc > 0:
+                        freq_rel_dezena = frequencia_abs_dezena / num_draws_no_chunk_calc
                     
                     current_occurrence_std_dev = 0.0
                     if 0 < freq_rel_dezena < 1: 
                         current_occurrence_std_dev = math.sqrt(freq_rel_dezena * (1 - freq_rel_dezena))
-                    # <<< FIM DO BLOCO ADICIONADO >>>
 
                     all_metrics_for_db.append({
                         'chunk_seq_id': chunk_seq_id, 'chunk_start_contest': start_contest, 'chunk_end_contest': end_contest,
                         'dezena': int(dezena_val),
                         'frequencia_absoluta': int(frequencia_abs_dezena), 
                         'atraso_medio_no_bloco': float(delay_metrics_dict["mean"].get(dezena_val, np.nan)) if pd.notna(delay_metrics_dict["mean"].get(dezena_val, np.nan)) else None,
-                        'atraso_maximo_no_bloco': int(delay_metrics_dict["max"].get(dezena_val, chunk_duration if 'chunk_duration' in locals() else (end_contest - start_contest + 1) )), # Ajuste para chunk_duration
-                        'atraso_final_no_bloco': int(delay_metrics_dict["final"].get(dezena_val, chunk_duration if 'chunk_duration' in locals() else (end_contest - start_contest + 1) )), # Ajuste para chunk_duration
-                        'occurrence_std_dev': current_occurrence_std_dev, # <<< CHAVE/VALOR ADICIONADO
-                        'delay_std_dev': float(delay_metrics_dict["std_dev"].get(dezena_val, np.nan)) if pd.notna(delay_metrics_dict["std_dev"].get(dezena_val, np.nan)) else None # <<< CHAVE/VALOR ADICIONADO
+                        # <<< CORREÇÃO: Usando chunk_actual_duration para o default >>>
+                        'atraso_maximo_no_bloco': int(delay_metrics_dict["max"].get(dezena_val, chunk_actual_duration)),
+                        'atraso_final_no_bloco': int(delay_metrics_dict["final"].get(dezena_val, chunk_actual_duration)),
+                        'occurrence_std_dev': current_occurrence_std_dev, 
+                        'delay_std_dev': float(delay_metrics_dict["std_dev"].get(dezena_val, np.nan)) if pd.notna(delay_metrics_dict["std_dev"].get(dezena_val, np.nan)) else None 
                     })
                 
                 group_metrics = calculate_block_group_summary_metrics(df_current_chunk, config)
@@ -286,7 +286,6 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: A
 
             if all_metrics_for_db:
                 metrics_df_long = pd.DataFrame(all_metrics_for_db)
-                # <<< DICIONÁRIO metric_value_cols ATUALIZADO >>>
                 metric_value_cols = {
                     "frequency": "frequencia_absoluta", 
                     "atraso_medio_bloco": "atraso_medio_no_bloco", 
@@ -295,15 +294,12 @@ def calculate_chunk_metrics_and_persist(all_data_df: pd.DataFrame, db_manager: A
                     "occurrence_std_dev_bloco": "occurrence_std_dev", 
                     "delay_std_dev_bloco": "delay_std_dev"            
                 }
-                # <<< FIM DA ATUALIZAÇÃO >>>
                 base_cols = ['chunk_seq_id', 'chunk_start_contest', 'chunk_end_contest', 'dezena']
-                for metric_name, value_col_original_name in metric_value_cols.items(): # Alterado value_col para value_col_original_name
-                    if value_col_original_name in metrics_df_long.columns: # Verifica se a coluna com nome original existe
+                for metric_name, value_col_original_name in metric_value_cols.items(): 
+                    if value_col_original_name in metrics_df_long.columns: 
                         df_to_save = metrics_df_long[base_cols + [value_col_original_name]].copy()
-                        # <<< LINHA DE RENAME REMOVIDA/COMENTADA >>>
-                        # df_to_save.rename(columns={value_col_original_name: 'metric_value'}, inplace=True) 
+                        # <<< LINHA DE RENAME FOI REMOVIDA PARA CORRIGIR O ERRO DO BLOCK_AGGREGATOR >>>
                         table_name = f"evol_metric_{metric_name}_{chunk_type}_{size_val}"
-                        # Salva o DataFrame com a coluna de métrica tendo seu nome original
                         db_manager.save_dataframe(df_to_save, table_name, if_exists='replace')
                         logger.info(f"Salvo em '{table_name}' com coluna de valor '{value_col_original_name}'.")
             
