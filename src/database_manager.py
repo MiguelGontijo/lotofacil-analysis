@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import logging
 from typing import List, Dict, Any, Tuple, Optional
+import os # Adicionado para o bloco if __name__ == '__main__' que você forneceu
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class DatabaseManager:
             logger.info(f"Salvando DataFrame na tabela '{table_name}' (if_exists='{if_exists}'). Linhas: {len(df)}")
             df.to_sql(table_name, self.conn, if_exists=if_exists, index=False)
             logger.info(f"DataFrame salvo com sucesso na tabela '{table_name}'.")
-        except Exception as e:
+        except Exception as e: # df.to_sql can raise various errors, not just sqlite3.Error
             logger.error(f"Erro ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
             raise
 
@@ -80,18 +81,18 @@ class DatabaseManager:
         """
         if not self.table_exists(table_name):
             logger.warning(f"Tabela '{table_name}' não existe. Retornando DataFrame vazio.")
-            return pd.DataFrame()
+            return pd.DataFrame() # Return empty DataFrame as per original logic
         if not self.conn:
             logger.error(f"Tentativa de carregar tabela '{table_name}' sem conexão.")
-            return pd.DataFrame()
+            return pd.DataFrame() # Return empty DataFrame
         try:
             logger.info(f"Carregando DataFrame da tabela '{table_name}'.")
             df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
             logger.info(f"DataFrame da tabela '{table_name}' carregado com {len(df)} linhas.")
             return df
-        except Exception as e:
+        except Exception as e: # pd.read_sql_query can also raise various errors
             logger.error(f"Erro ao carregar DataFrame da tabela '{table_name}': {e}", exc_info=True)
-            return pd.DataFrame()
+            return pd.DataFrame() # Return empty DataFrame on error
 
     # Alias para compatibilidade com o código existente que usa load_dataframe_from_db
     def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
@@ -99,8 +100,8 @@ class DatabaseManager:
         return self.load_dataframe(table_name)
 
     def table_exists(self, table_name: str) -> bool:
-        if not self.cursor:
-            logger.debug("Tentativa de verificar tabela sem um cursor ativo, retornando False.")
+        if not self.cursor: # Check if cursor is None
+            logger.error("Tentativa de verificar tabela sem um cursor ativo, retornando False.") # Changed from debug to error
             return False
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
@@ -109,7 +110,7 @@ class DatabaseManager:
             logger.error(f"Erro ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
             return False
         
-    # NOVO MÉTODO ADICIONADO
+    # NOVO MÉTODO ADICIONADO (conforme seu código fornecido)
     def get_table_names(self) -> List[str]:
         """Retorna uma lista com os nomes de todas as tabelas no banco de dados."""
         if self.cursor is None:
@@ -152,10 +153,11 @@ class DatabaseManager:
         self._create_table_propriedades_numericas_por_concurso()
         self._create_table_analise_repeticao_concurso_anterior()
         
-        # Tabelas de Chunk (exemplos, você precisará de todas)
+        # Tabelas de Chunk 
         # self._create_table_evol_metric_frequency_linear_50() # Exemplo
         # self._create_table_evol_block_group_metrics_linear_50() # Exemplo
         # self._create_table_bloco_analises_consolidadas_linear_50() # Exemplo
+        self._create_table_chunk_metrics() # <<< ADIÇÃO DA CHAMADA AQUI
 
         # Tabelas de Rank Trend
         # self._create_table_evol_rank_frequency_bloco_linear_50() # Exemplo
@@ -254,15 +256,55 @@ class DatabaseManager:
         query = "CREATE TABLE IF NOT EXISTS rank_geral_dezenas_por_frequencia (Dezena INTEGER PRIMARY KEY, frequencia_total INTEGER, rank_geral INTEGER);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'rank_geral_dezenas_por_frequencia' OK.")
 
+    # <<< NOVO MÉTODO ADICIONADO AQUI >>>
+    def _create_table_chunk_metrics(self) -> None:
+        query = """
+        CREATE TABLE IF NOT EXISTS chunk_metrics (
+            chunk_type TEXT,
+            chunk_size INTEGER,
+            chunk_start_draw_id INTEGER,
+            chunk_end_draw_id INTEGER,
+            number INTEGER,
+            frequency_in_chunk_abs INTEGER,
+            frequency_in_chunk_rel REAL,
+            current_delay_in_chunk INTEGER,
+            max_delay_in_chunk INTEGER,
+            avg_delay_in_chunk REAL,
+            delay_std_dev REAL,
+            occurrence_std_dev REAL,
+            PRIMARY KEY (chunk_type, chunk_size, chunk_start_draw_id, number)
+        )
+        """
+        self._execute_query(query, commit=True) 
+        logger.debug("Tabela 'chunk_metrics' verificada/criada.")
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     try:
         # Este caminho é relativo ao local onde este script está. Ajuste se necessário.
         # Para testes, é melhor usar um caminho absoluto ou um db em memória.
         # db_m = DatabaseManager(db_path=':memory:')
-        db_m = DatabaseManager(db_path='../Data/test_lotofacil.db') # Exemplo
+        
+        # Correção para o caminho do banco de dados de teste no if __name__
+        # Presumindo que a pasta Data está um nível acima de onde o script database_manager.py está (src)
+        # Se o script é executado de Lotofacil_Analysis/, então Data/test_lotofacil.db é correto
+        # Se o script é src/database_manager.py e executado de Lotofacil_Analysis/, o path é Data/test_lotofacil.db
+        # Se o script é src/database_manager.py e executado de src/, o path seria ../Data/test_lotofacil.db
+
+        # Para consistência e evitar erro se executado de src/:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Lotofacil_Analysis/
+        test_db_path = os.path.join(base_dir, 'Data', 'test_lotofacil.db')
+        
+        db_m = DatabaseManager(db_path=test_db_path) 
+        db_m._create_all_tables() # Chamada para garantir que as tabelas sejam criadas para o teste
         
         # Teste rápido para verificar se a tabela foi criada
+        if db_m.table_exists('chunk_metrics'): # Testando a nova tabela
+            logger.info("Teste: Tabela 'chunk_metrics' existe.")
+        else:
+            logger.error("Teste: Tabela 'chunk_metrics' NÃO existe.")
+        
         if db_m.table_exists('frequent_itemsets'):
             logger.info("Teste: Tabela 'frequent_itemsets' existe.")
         else:
@@ -289,6 +331,9 @@ if __name__ == '__main__':
         logger.error(f"Erro no exemplo de uso do DatabaseManager: {e_test}", exc_info=True)
     finally:
         # Limpar o arquivo de teste db se foi criado
-        if os.path.exists('../Data/test_lotofacil.db'):
-            os.remove('../Data/test_lotofacil.db')
-            logger.info("Arquivo test_lotofacil.db removido.")
+        if os.path.exists(test_db_path):
+            try:
+                os.remove(test_db_path)
+                logger.info(f"Arquivo de teste '{test_db_path}' removido.")
+            except OSError as e_os:
+                logger.error(f"Erro ao remover arquivo de teste '{test_db_path}': {e_os}")
