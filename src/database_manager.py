@@ -1,9 +1,10 @@
-# Lotofacil_Analysis/src/database_manager.py
+# src/database_manager.py
 import sqlite3
 import pandas as pd
 import logging
 from typing import List, Dict, Any, Tuple, Optional
-import os # Adicionado para o bloco if __name__ == '__main__' que você forneceu
+import os 
+import json 
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,6 @@ class DatabaseManager:
         self.cursor: Optional[sqlite3.Cursor] = None
         try:
             self.connect()
-            # _create_all_tables deve ser chamado aqui se você quiser que as tabelas
-            # sejam criadas/verificadas na instanciação.
-            # Vou comentar por enquanto, pois o main.py pode estar chamando-o
-            # ou ele pode ser chamado seletivamente.
-            # self._create_all_tables() # Descomente se necessário na inicialização
             logger.info(f"Database Manager inicializado e conectado a: {db_path}")
         except sqlite3.Error as e:
             logger.error(f"Erro ao inicializar o DatabaseManager para {db_path}: {e}", exc_info=True)
@@ -71,38 +67,42 @@ class DatabaseManager:
             logger.info(f"Salvando DataFrame na tabela '{table_name}' (if_exists='{if_exists}'). Linhas: {len(df)}")
             df.to_sql(table_name, self.conn, if_exists=if_exists, index=False)
             logger.info(f"DataFrame salvo com sucesso na tabela '{table_name}'.")
-        except Exception as e: # df.to_sql can raise various errors, not just sqlite3.Error
+        except Exception as e: 
             logger.error(f"Erro ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
             raise
 
     def load_dataframe(self, table_name: str) -> Optional[pd.DataFrame]:
-        """
-        Carrega uma tabela inteira do banco de dados para um DataFrame pandas.
-        """
         if not self.table_exists(table_name):
             logger.warning(f"Tabela '{table_name}' não existe. Retornando DataFrame vazio.")
-            return pd.DataFrame() # Return empty DataFrame as per original logic
+            return pd.DataFrame() 
         if not self.conn:
             logger.error(f"Tentativa de carregar tabela '{table_name}' sem conexão.")
-            return pd.DataFrame() # Return empty DataFrame
+            return pd.DataFrame() 
         try:
             logger.info(f"Carregando DataFrame da tabela '{table_name}'.")
             df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
             logger.info(f"DataFrame da tabela '{table_name}' carregado com {len(df)} linhas.")
             return df
-        except Exception as e: # pd.read_sql_query can also raise various errors
+        except Exception as e: 
             logger.error(f"Erro ao carregar DataFrame da tabela '{table_name}': {e}", exc_info=True)
-            return pd.DataFrame() # Return empty DataFrame on error
+            return pd.DataFrame() 
 
-    # Alias para compatibilidade com o código existente que usa load_dataframe_from_db
     def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
         logger.debug(f"Chamando load_dataframe_from_db, redirecionando para load_dataframe para tabela: {table_name}")
         return self.load_dataframe(table_name)
 
     def table_exists(self, table_name: str) -> bool:
-        if not self.cursor: # Check if cursor is None
-            logger.error("Tentativa de verificar tabela sem um cursor ativo, retornando False.") # Changed from debug to error
-            return False
+        if not self.cursor: 
+            logger.debug("Cursor não está ativo em table_exists. Tentando reconectar.")
+            try:
+                self.connect()
+            except sqlite3.Error as e_connect:
+                logger.error(f"Falha ao reconectar em table_exists para '{table_name}': {e_connect}")
+                return False 
+            if not self.cursor: 
+                 logger.error(f"Cursor ainda não está ativo após tentativa de reconexão em table_exists para '{table_name}'.")
+                 return False
+
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
             return self.cursor.fetchone() is not None
@@ -110,12 +110,17 @@ class DatabaseManager:
             logger.error(f"Erro ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
             return False
         
-    # NOVO MÉTODO ADICIONADO (conforme seu código fornecido)
     def get_table_names(self) -> List[str]:
-        """Retorna uma lista com os nomes de todas as tabelas no banco de dados."""
-        if self.cursor is None:
-            logger.error("Não é possível obter nomes de tabelas: Cursor não inicializado.")
-            return []
+        if not self.conn or not self.cursor: 
+            logger.debug("Tentativa de obter nomes de tabelas sem conexão/cursor. Tentando reconectar.")
+            try:
+                self.connect()
+            except sqlite3.Error as e_connect:
+                logger.error(f"Falha ao reconectar para obter nomes de tabelas: {e_connect}")
+                return []
+            if not self.cursor:
+                 logger.error("Cursor ainda não está ativo após tentativa de reconexão para obter nomes de tabelas.")
+                 return []
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tables = self.cursor.fetchall()
@@ -125,20 +130,18 @@ class DatabaseManager:
             return []
     
     def _create_all_tables(self) -> None:
-        """Cria todas as tabelas necessárias para a aplicação, se não existirem."""
         logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
         
-        # Essenciais que vi nos logs ou são comuns
         self._create_table_frequencia_absoluta()
         self._create_table_frequencia_relativa()
         self._create_table_atraso_atual()
         self._create_table_atraso_maximo()
-        self._create_table_atraso_maximo_separado() # Para o step específico
+        self._create_table_atraso_maximo_separado() 
         self._create_table_atraso_medio()
-        self._create_table_pair_metrics() # Tabela para análise de pares
+        self._create_table_pair_metrics() 
         self._create_frequent_itemsets_table()
+        self._create_table_frequent_itemset_metrics() 
 
-        # Tabelas de Ciclo
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
         self._create_table_ciclo_progression()
@@ -149,26 +152,37 @@ class DatabaseManager:
         self._create_table_ciclo_rank_frequency()
         self._create_table_ciclo_group_metrics()
 
-        # Outras tabelas
         self._create_table_propriedades_numericas_por_concurso()
         self._create_table_analise_repeticao_concurso_anterior()
         
-        # Tabelas de Chunk 
-        # self._create_table_evol_metric_frequency_linear_50() # Exemplo
-        # self._create_table_evol_block_group_metrics_linear_50() # Exemplo
-        # self._create_table_bloco_analises_consolidadas_linear_50() # Exemplo
-        self._create_table_chunk_metrics() # <<< ADIÇÃO DA CHAMADA AQUI
+        self._create_table_chunk_metrics() 
 
-        # Tabelas de Rank Trend
-        # self._create_table_evol_rank_frequency_bloco_linear_50() # Exemplo
         self._create_table_rank_geral_dezenas_por_frequencia()
         
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
 
-    # ----- Definições de Tabelas Específicas -----
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
+
+    def _create_table_frequent_itemset_metrics(self) -> None:
+        query = """
+        CREATE TABLE IF NOT EXISTS frequent_itemset_metrics (
+            itemset_str TEXT PRIMARY KEY,
+            length INTEGER,
+            support REAL,
+            frequency_count INTEGER,
+            last_occurrence_contest_id INTEGER, -- <<< COLUNA ALTERADA AQUI
+            current_delay INTEGER,
+            mean_delay REAL,
+            max_delay INTEGER,
+            std_dev_delay REAL,
+            occurrences_draw_ids TEXT, -- Mantido como no seu original, refere-se aos IDs dos concursos
+            FOREIGN KEY(itemset_str) REFERENCES frequent_itemsets(itemset_str)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'frequent_itemset_metrics' verificada/criada.")
 
     def _create_table_frequencia_absoluta(self):
         query = "CREATE TABLE IF NOT EXISTS frequencia_absoluta (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Absoluta\" INTEGER);"
@@ -186,7 +200,7 @@ class DatabaseManager:
         query = "CREATE TABLE IF NOT EXISTS atraso_maximo (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo' OK.")
     
-    def _create_table_atraso_maximo_separado(self): # Tabela para o step separado
+    def _create_table_atraso_maximo_separado(self): 
         query = "CREATE TABLE IF NOT EXISTS atraso_maximo_separado (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo_separado' OK.")
 
@@ -199,11 +213,11 @@ class DatabaseManager:
         self._execute_query(query, commit=True); logger.debug("Tabela 'pair_metrics' OK.")
 
     def _create_table_ciclos_detalhe(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclos_detalhe (ciclo_num INTEGER, concurso_inicio INTEGER, concurso_fim INTEGER, duracao_concursos INTEGER, numeros_faltantes TEXT, qtd_faltantes INTEGER);"
+        query = "CREATE TABLE IF NOT EXISTS ciclos_detalhe (ciclo_num INTEGER, concurso_inicio INTEGER, concurso_fim INTEGER, duracao_concursos INTEGER, numeros_faltantes TEXT, qtd_faltantes INTEGER, PRIMARY KEY(ciclo_num, concurso_inicio));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_detalhe' OK.")
 
     def _create_table_ciclos_sumario_estatisticas(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclos_sumario_estatisticas (total_ciclos_fechados INTEGER, duracao_media_ciclo REAL, duracao_min_ciclo INTEGER, duracao_max_ciclo INTEGER, duracao_mediana_ciclo REAL);"
+        query = "CREATE TABLE IF NOT EXISTS ciclos_sumario_estatisticas (summary_id INTEGER PRIMARY KEY DEFAULT 1, total_ciclos_fechados INTEGER, duracao_media_ciclo REAL, duracao_min_ciclo INTEGER, duracao_max_ciclo INTEGER, duracao_mediana_ciclo REAL);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_sumario_estatisticas' OK.")
         
     def _create_table_ciclo_progression(self):
@@ -216,36 +230,37 @@ class DatabaseManager:
                     qtd_apuradas_neste_concurso INTEGER, 
                     numeros_faltantes_apos_este_concurso TEXT, 
                     qtd_faltantes_apos_este_concurso INTEGER, 
-                    ciclo_fechou_neste_concurso INTEGER
+                    ciclo_fechou_neste_concurso INTEGER,
+                    PRIMARY KEY (Concurso, ciclo_num_associado)
                  );"""
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_progression' OK.")
 
     def _create_table_ciclo_metric_frequency(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_frequency' OK.")
     
     def _create_table_ciclo_metric_atraso_medio(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_medio (ciclo_num INTEGER, dezena INTEGER, atraso_medio_no_ciclo REAL);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_medio (ciclo_num INTEGER, dezena INTEGER, atraso_medio_no_ciclo REAL, PRIMARY KEY (ciclo_num, dezena));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_medio' OK.")
 
     def _create_table_ciclo_metric_atraso_maximo(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_maximo (ciclo_num INTEGER, dezena INTEGER, atraso_maximo_no_ciclo INTEGER);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_maximo (ciclo_num INTEGER, dezena INTEGER, atraso_maximo_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_maximo' OK.")
 
     def _create_table_ciclo_metric_atraso_final(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_final (ciclo_num INTEGER, dezena INTEGER, atraso_final_no_ciclo INTEGER);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_final (ciclo_num INTEGER, dezena INTEGER, atraso_final_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_final' OK.")
 
     def _create_table_ciclo_rank_frequency(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_rank_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, rank_freq_no_ciclo INTEGER);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_rank_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, rank_freq_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_rank_frequency' OK.")
 
     def _create_table_ciclo_group_metrics(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_group_metrics (ciclo_num INTEGER, avg_pares_no_ciclo REAL, avg_impares_no_ciclo REAL, avg_primos_no_ciclo REAL);"
+        query = "CREATE TABLE IF NOT EXISTS ciclo_group_metrics (ciclo_num INTEGER PRIMARY KEY, avg_pares_no_ciclo REAL, avg_impares_no_ciclo REAL, avg_primos_no_ciclo REAL);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_group_metrics' OK.")
 
     def _create_table_propriedades_numericas_por_concurso(self):
-        query = "CREATE TABLE IF NOT EXISTS propriedades_numericas_por_concurso (\"Concurso\" INTEGER PRIMARY KEY, soma_dezenas INTEGER, pares INTEGER, impares INTEGER, primos INTEGER);" # Adicionar mais colunas de propriedades se existirem
+        query = "CREATE TABLE IF NOT EXISTS propriedades_numericas_por_concurso (\"Concurso\" INTEGER PRIMARY KEY, soma_dezenas INTEGER, pares INTEGER, impares INTEGER, primos INTEGER);" 
         self._execute_query(query, commit=True); logger.debug("Tabela 'propriedades_numericas_por_concurso' OK.")
 
     def _create_table_analise_repeticao_concurso_anterior(self):
@@ -256,7 +271,6 @@ class DatabaseManager:
         query = "CREATE TABLE IF NOT EXISTS rank_geral_dezenas_por_frequencia (Dezena INTEGER PRIMARY KEY, frequencia_total INTEGER, rank_geral INTEGER);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'rank_geral_dezenas_por_frequencia' OK.")
 
-    # <<< NOVO MÉTODO ADICIONADO AQUI >>>
     def _create_table_chunk_metrics(self) -> None:
         query = """
         CREATE TABLE IF NOT EXISTS chunk_metrics (
@@ -278,40 +292,42 @@ class DatabaseManager:
         self._execute_query(query, commit=True) 
         logger.debug("Tabela 'chunk_metrics' verificada/criada.")
 
+    def __enter__(self): 
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb): 
+        self.close()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    db_test_path = None 
     try:
-        # Este caminho é relativo ao local onde este script está. Ajuste se necessário.
-        # Para testes, é melhor usar um caminho absoluto ou um db em memória.
-        # db_m = DatabaseManager(db_path=':memory:')
+        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_base_dir = os.path.dirname(current_script_dir) 
+        data_dir = os.path.join(project_base_dir, 'Data')
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir) 
+            logger.info(f"Diretório '{data_dir}' criado.")
+            
+        db_test_path = os.path.join(data_dir, 'test_lotofacil_manager.db')
+        logger.info(f"Usando banco de dados de teste em: {db_test_path}")
         
-        # Correção para o caminho do banco de dados de teste no if __name__
-        # Presumindo que a pasta Data está um nível acima de onde o script database_manager.py está (src)
-        # Se o script é executado de Lotofacil_Analysis/, então Data/test_lotofacil.db é correto
-        # Se o script é src/database_manager.py e executado de Lotofacil_Analysis/, o path é Data/test_lotofacil.db
-        # Se o script é src/database_manager.py e executado de src/, o path seria ../Data/test_lotofacil.db
+        db_m = DatabaseManager(db_path=db_test_path)
+        db_m._create_all_tables() 
+        
+        logger.info(f"Tabelas no banco de dados: {db_m.get_table_names()}")
 
-        # Para consistência e evitar erro se executado de src/:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Lotofacil_Analysis/
-        test_db_path = os.path.join(base_dir, 'Data', 'test_lotofacil.db')
-        
-        db_m = DatabaseManager(db_path=test_db_path) 
-        db_m._create_all_tables() # Chamada para garantir que as tabelas sejam criadas para o teste
-        
-        # Teste rápido para verificar se a tabela foi criada
-        if db_m.table_exists('chunk_metrics'): # Testando a nova tabela
-            logger.info("Teste: Tabela 'chunk_metrics' existe.")
-        else:
-            logger.error("Teste: Tabela 'chunk_metrics' NÃO existe.")
-        
         if db_m.table_exists('frequent_itemsets'):
             logger.info("Teste: Tabela 'frequent_itemsets' existe.")
         else:
-            logger.error("Teste: Tabela 'frequent_itemsets' NÃO existe (erro esperado se não foi criada em _create_all_tables).")
-        
-        # Teste do load_dataframe
-        # Criar uma tabela e dados de teste
+            logger.error("Teste: Tabela 'frequent_itemsets' NÃO existe.")
+
+        if db_m.table_exists('frequent_itemset_metrics'): 
+            logger.info("Teste: Tabela 'frequent_itemset_metrics' existe.")
+        else:
+            logger.error("Teste: Tabela 'frequent_itemset_metrics' NÃO existe.")
+
         test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
         db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')
         loaded_df = db_m.load_dataframe('test_table_load')
@@ -320,8 +336,8 @@ if __name__ == '__main__':
         else:
             logger.error("Teste load_dataframe: Falha ao carregar ou DataFrame vazio.")
 
-        df_non_existent = db_m.load_dataframe('tabela_nao_existe')
-        if df_non_existent is not None and df_non_existent.empty:
+        df_non_existent = db_m.load_dataframe('tabela_nao_existe_teste')
+        if df_non_existent.empty: 
             logger.info("Teste load_dataframe para tabela inexistente: Retornou DataFrame vazio como esperado.")
         else:
             logger.error(f"Teste load_dataframe para tabela inexistente: Inesperado. Retornou: {df_non_existent}")
@@ -330,10 +346,9 @@ if __name__ == '__main__':
     except Exception as e_test:
         logger.error(f"Erro no exemplo de uso do DatabaseManager: {e_test}", exc_info=True)
     finally:
-        # Limpar o arquivo de teste db se foi criado
-        if os.path.exists(test_db_path):
+        if db_test_path and os.path.exists(db_test_path): 
             try:
-                os.remove(test_db_path)
-                logger.info(f"Arquivo de teste '{test_db_path}' removido.")
+                os.remove(db_test_path)
+                logger.info(f"Arquivo de teste '{db_test_path}' removido.")
             except OSError as e_os:
-                logger.error(f"Erro ao remover arquivo de teste '{test_db_path}': {e_os}")
+                logger.error(f"Erro ao remover arquivo de teste '{db_test_path}': {e_os}")
