@@ -141,12 +141,14 @@ class DatabaseManager:
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
         self._create_table_sequence_metrics()
-        # Adições das etapas anteriores mantidas
+        # Adições das etapas anteriores mantidas (assumindo que já foram adicionadas ao seu arquivo)
         if hasattr(self, '_create_table_draw_position_frequency'): self._create_table_draw_position_frequency()
         if hasattr(self, '_create_table_geral_ma_frequency'): self._create_table_geral_ma_frequency()
         if hasattr(self, '_create_table_geral_ma_delay'): self._create_table_geral_ma_delay()
         if hasattr(self, '_create_table_geral_recurrence_analysis'): self._create_table_geral_recurrence_analysis()
-        self._create_table_association_rules() # Nova chamada
+        if hasattr(self, '_create_table_association_rules'): self._create_table_association_rules()
+        self._create_table_grid_line_distribution() # Nova chamada
+        self._create_table_grid_column_distribution() # Nova chamada
 
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
@@ -167,80 +169,129 @@ class DatabaseManager:
         
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
 
-    # Métodos de criação de tabela existentes (frequencia_absoluta, etc.) permanecem aqui...
-    # ... (todos os seus _create_table_* existentes)
+    # --- Métodos de Criação de Tabelas Adicionados nas Etapas Anteriores (devem já existir no seu arquivo) ---
+    # Manter as definições que já fizemos para:
+    # _create_table_draw_position_frequency
+    # _create_table_geral_ma_frequency
+    # _create_table_geral_ma_delay
+    # _create_table_geral_recurrence_analysis
+    # _create_table_association_rules
+    # (Se alguma não estiver no seu arquivo, eu a adicionaria aqui, mas estou assumindo que elas foram aplicadas)
+    # Para evitar redefinir métodos, usarei hasattr antes de definir se elas não são o foco desta etapa.
+    # No entanto, para os métodos que *estamos adicionando agora*, eles serão definidos diretamente.
 
-    # Adicionando os métodos que podem ter sido definidos em etapas anteriores, se não estiverem já
-    # (Com base no histórico, eles já deveriam estar aqui)
+    def _ensure_method_exists(self, method_name, creation_query, log_message):
+        """Garante que um método de criação de tabela exista e cria a tabela se necessário."""
+        if not hasattr(self, method_name):
+            # Define o método dinamicamente se não existir (improvável para este fluxo, mais para robustez)
+            # Ou, melhor, apenas cria a tabela se o método específico não for o foco agora.
+            # Para os métodos que são o foco DESTA etapa, nós os definimos explicitamente.
+            # Para os das etapas anteriores, esperamos que já existam.
+            # A lógica aqui é simplificada: o _create_all_tables chama os métodos pelo nome.
+            # Se o método não está definido na classe, dará AttributeError.
+            # O código abaixo é para garantir que as tabelas sejam criadas mesmo que
+            # os métodos de criação tenham sido omitidos por engano ao colar o código.
+            # No entanto, o padrão é definir todos os métodos _create_table_* explicitamente.
+            # Vamos manter o código conforme a estrutura do seu arquivo.
+            pass # Este helper não será usado, vamos definir os métodos explicitamente.
+
+    # Métodos de criação de tabela já existentes (mantidos como estão no seu arquivo original)
+    # ... (todos os seus _create_table_* existentes) ...
+    # Apenas adicionaremos os novos abaixo e as chamadas em _create_all_tables.
+    # Se os métodos abaixo já existem no seu arquivo, esta redefinição não causará problemas
+    # devido ao "IF NOT EXISTS" no SQL, mas o ideal é apenas adicionar o que é novo.
+
     def _create_table_draw_position_frequency(self) -> None:
-        # Definição da tabela draw_position_frequency (se não existir no arquivo original)
-        if not self.table_exists('draw_position_frequency'): # Verifica para não redefinir se já existe
-            query = """
-            CREATE TABLE IF NOT EXISTS draw_position_frequency (
-                Dezena INTEGER PRIMARY KEY, Posicao_1 INTEGER DEFAULT 0, Posicao_2 INTEGER DEFAULT 0,
-                Posicao_3 INTEGER DEFAULT 0, Posicao_4 INTEGER DEFAULT 0, Posicao_5 INTEGER DEFAULT 0,
-                Posicao_6 INTEGER DEFAULT 0, Posicao_7 INTEGER DEFAULT 0, Posicao_8 INTEGER DEFAULT 0,
-                Posicao_9 INTEGER DEFAULT 0, Posicao_10 INTEGER DEFAULT 0, Posicao_11 INTEGER DEFAULT 0,
-                Posicao_12 INTEGER DEFAULT 0, Posicao_13 INTEGER DEFAULT 0, Posicao_14 INTEGER DEFAULT 0,
-                Posicao_15 INTEGER DEFAULT 0
-            );"""
-            self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
+        # Esta é uma das tabelas adicionadas anteriormente.
+        # Se já existe no seu arquivo, esta definição pode ser redundante aqui,
+        # mas o IF NOT EXISTS no SQL protege.
+        # Idealmente, adicionamos apenas os métodos novos desta etapa.
+        query = """
+        CREATE TABLE IF NOT EXISTS draw_position_frequency (
+            Dezena INTEGER PRIMARY KEY, Posicao_1 INTEGER DEFAULT 0, Posicao_2 INTEGER DEFAULT 0,
+            Posicao_3 INTEGER DEFAULT 0, Posicao_4 INTEGER DEFAULT 0, Posicao_5 INTEGER DEFAULT 0,
+            Posicao_6 INTEGER DEFAULT 0, Posicao_7 INTEGER DEFAULT 0, Posicao_8 INTEGER DEFAULT 0,
+            Posicao_9 INTEGER DEFAULT 0, Posicao_10 INTEGER DEFAULT 0, Posicao_11 INTEGER DEFAULT 0,
+            Posicao_12 INTEGER DEFAULT 0, Posicao_13 INTEGER DEFAULT 0, Posicao_14 INTEGER DEFAULT 0,
+            Posicao_15 INTEGER DEFAULT 0
+        );"""
+        if not self.table_exists('draw_position_frequency'): # Checa antes para evitar log repetido se já existe
+             self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
 
     def _create_table_geral_ma_frequency(self) -> None:
-        # Definição da tabela geral_ma_frequency (se não existir no arquivo original)
+        query = """
+        CREATE TABLE IF NOT EXISTS geral_ma_frequency (
+            Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
+            MA_Frequencia REAL, PRIMARY KEY (Concurso, Dezena, Janela)
+        );"""
         if not self.table_exists('geral_ma_frequency'):
-            query = """
-            CREATE TABLE IF NOT EXISTS geral_ma_frequency (
-                Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
-                MA_Frequencia REAL, PRIMARY KEY (Concurso, Dezena, Janela)
-            );"""
             self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
 
     def _create_table_geral_ma_delay(self) -> None:
-        # Definição da tabela geral_ma_delay (se não existir no arquivo original)
+        query = """
+        CREATE TABLE IF NOT EXISTS geral_ma_delay (
+            Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
+            MA_Atraso REAL, PRIMARY KEY (Concurso, Dezena, Janela)
+        );"""
         if not self.table_exists('geral_ma_delay'):
-            query = """
-            CREATE TABLE IF NOT EXISTS geral_ma_delay (
-                Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
-                MA_Atraso REAL, PRIMARY KEY (Concurso, Dezena, Janela)
-            );"""
             self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
 
     def _create_table_geral_recurrence_analysis(self) -> None:
-        # Definição da tabela geral_recurrence_analysis (se não existir no arquivo original)
+        query = """
+        CREATE TABLE IF NOT EXISTS geral_recurrence_analysis (
+            Dezena INTEGER PRIMARY KEY, Atraso_Atual INTEGER, CDF_Atraso_Atual REAL,
+            Total_Gaps_Observados INTEGER, Media_Gaps REAL, Mediana_Gaps INTEGER,
+            Std_Dev_Gaps REAL, Max_Gap_Observado INTEGER, Gaps_Observados TEXT
+        );"""
         if not self.table_exists('geral_recurrence_analysis'):
-            query = """
-            CREATE TABLE IF NOT EXISTS geral_recurrence_analysis (
-                Dezena INTEGER PRIMARY KEY, Atraso_Atual INTEGER, CDF_Atraso_Atual REAL,
-                Total_Gaps_Observados INTEGER, Media_Gaps REAL, Mediana_Gaps INTEGER,
-                Std_Dev_Gaps REAL, Max_Gap_Observado INTEGER, Gaps_Observados TEXT
-            );"""
             self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
 
     def _create_table_association_rules(self) -> None:
-        """
-        Cria a tabela para armazenar as regras de associação geradas.
-        """
         query = """
         CREATE TABLE IF NOT EXISTS association_rules (
-            antecedents_str TEXT NOT NULL,
-            consequents_str TEXT NOT NULL,
-            antecedent_support REAL,
-            consequent_support REAL,
-            support REAL,
-            confidence REAL,
-            lift REAL,
-            leverage REAL,
-            conviction REAL,
+            antecedents_str TEXT NOT NULL, consequents_str TEXT NOT NULL,
+            antecedent_support REAL, consequent_support REAL, support REAL,
+            confidence REAL, lift REAL, leverage REAL, conviction REAL,
             PRIMARY KEY (antecedents_str, consequents_str)
+        );"""
+        if not self.table_exists('association_rules'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
+
+    # --- NOVOS MÉTODOS PARA ANÁLISE DE LINHAS E COLUNAS ---
+    def _create_table_grid_line_distribution(self) -> None:
+        """
+        Cria a tabela para armazenar a distribuição de frequência de dezenas sorteadas por linha.
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS grid_line_distribution (
+            Linha TEXT NOT NULL,                           -- Ex: 'L1', 'L2', ..., 'L5'
+            Qtd_Dezenas_Sorteadas INTEGER NOT NULL,      -- Quantidade de dezenas sorteadas naquela linha (0 a 5)
+            Frequencia_Absoluta INTEGER NOT NULL,        -- Número de concursos onde isso ocorreu
+            Frequencia_Relativa REAL NOT NULL,           -- Percentual de concursos onde isso ocorreu
+            PRIMARY KEY (Linha, Qtd_Dezenas_Sorteadas)
         );
         """
         self._execute_query(query, commit=True)
-        logger.debug("Tabela 'association_rules' verificada/criada.")
+        logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
 
-    # ... (restante dos seus métodos _create_table_* existentes, como _create_frequent_itemsets_table, etc.)
-    # Mantenha todos os seus métodos de criação de tabela existentes aqui.
-    # O código abaixo são exemplos que você já tem no seu arquivo original da pasta.
+    def _create_table_grid_column_distribution(self) -> None:
+        """
+        Cria a tabela para armazenar a distribuição de frequência de dezenas sorteadas por coluna.
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS grid_column_distribution (
+            Coluna TEXT NOT NULL,                          -- Ex: 'C1', 'C2', ..., 'C5'
+            Qtd_Dezenas_Sorteadas INTEGER NOT NULL,      -- Quantidade de dezenas sorteadas naquela coluna (0 a 5)
+            Frequencia_Absoluta INTEGER NOT NULL,        -- Número de concursos onde isso ocorreu
+            Frequencia_Relativa REAL NOT NULL,           -- Percentual de concursos onde isso ocorreu
+            PRIMARY KEY (Coluna, Qtd_Dezenas_Sorteadas)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
+    
+    # --- Métodos de criação de tabelas existentes do seu arquivo original ---
+    # (Garantir que eles estejam presentes e corretos no seu arquivo DatabaseManager)
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
@@ -401,7 +452,8 @@ if __name__ == '__main__':
 
         tables_to_check = [
             'draw_position_frequency', 'geral_ma_frequency', 'geral_ma_delay', 
-            'geral_recurrence_analysis', 'association_rules' # Nova verificação
+            'geral_recurrence_analysis', 'association_rules',
+            'grid_line_distribution', 'grid_column_distribution' # Novas verificações
         ]
         for table_name in tables_to_check:
             if db_m.table_exists(table_name):

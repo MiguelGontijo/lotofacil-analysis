@@ -75,32 +75,51 @@ SEQUENCE_ANALYSIS_CONFIG = {
         "active": True           
     }
 }
-# Nomes de Tabelas
+# Nomes de Tabelas (Mantendo os que já estavam no seu arquivo original da pasta)
 SEQUENCE_METRICS_TABLE_NAME = "sequence_metrics" 
 FREQUENT_ITEMSETS_TABLE_NAME = "frequent_itemsets"
 FREQUENT_ITEMSET_METRICS_TABLE_NAME = "frequent_itemset_metrics"
 DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency"
-GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency" # Mantido da etapa anterior
-GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay" # Mantido da etapa anterior
-RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis" # Mantido da etapa anterior
+GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
+GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
+RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis"
+ASSOCIATION_RULES_TABLE_NAME: str = "association_rules"
 
-# --- Configurações para Médias Móveis Gerais --- (Mantidas da etapa anterior)
+
+# --- Configurações para Médias Móveis Gerais --- (Mantidas)
 _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
 _geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30')
 GERAL_MA_DELAY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_delay_windows_str.split(',')]
 
-# --- Configurações para Regras de Associação (Market Basket Analysis) ---
+# --- Configurações para Regras de Associação (Market Basket Analysis) --- (Mantidas)
 ASSOCIATION_RULES_MIN_CONFIDENCE: float = float(os.getenv('ASSOCIATION_RULES_MIN_CONFIDENCE', '0.5'))
 ASSOCIATION_RULES_MIN_LIFT: float = float(os.getenv('ASSOCIATION_RULES_MIN_LIFT', '1.0'))
-ASSOCIATION_RULES_TABLE_NAME: str = "association_rules"
+
+# --- Configurações para Análise de Linhas e Colunas ---
+LOTOFACIL_GRID_LINES: Dict[str, List[int]] = {
+    "L1": [1, 2, 3, 4, 5],
+    "L2": [6, 7, 8, 9, 10],
+    "L3": [11, 12, 13, 14, 15],
+    "L4": [16, 17, 18, 19, 20],
+    "L5": [21, 22, 23, 24, 25],
+}
+LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = {
+    "C1": [1, 6, 11, 16, 21],
+    "C2": [2, 7, 12, 17, 22],
+    "C3": [3, 8, 13, 18, 23],
+    "C4": [4, 9, 14, 19, 24],
+    "C5": [5, 10, 15, 20, 25],
+}
+GRID_LINE_DISTRIBUTION_TABLE_NAME: str = "grid_line_distribution"
+GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = "grid_column_distribution"
 
 
 class Config:
     BASE_DIR: str = BASE_DIR
-    DATA_DIR: str = DATA_DIR
-    LOG_DIR: str = LOG_DIR
-    PLOT_DIR: str = PLOT_DIR
+    DATA_DIR: str = DATA_DIR 
+    LOG_DIR: str = LOG_DIR   
+    PLOT_DIR: str = PLOT_DIR 
     PLOT_DIR_CONFIG: str = PLOT_DIR_CONFIG
 
     DB_PATH: str = DB_PATH
@@ -135,7 +154,7 @@ class Config:
     
     SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG
     
-    # Nomes de Tabelas como atributos da classe
+    # Nomes de Tabelas como atributos da classe (Mantendo os que já estavam)
     SEQUENCE_METRICS_TABLE_NAME = SEQUENCE_METRICS_TABLE_NAME
     FREQUENT_ITEMSETS_TABLE_NAME = FREQUENT_ITEMSETS_TABLE_NAME
     FREQUENT_ITEMSET_METRICS_TABLE_NAME = FREQUENT_ITEMSET_METRICS_TABLE_NAME
@@ -143,14 +162,19 @@ class Config:
     GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
     GERAL_MA_DELAY_TABLE_NAME: str = GERAL_MA_DELAY_TABLE_NAME
     RECURRENCE_ANALYSIS_TABLE_NAME: str = RECURRENCE_ANALYSIS_TABLE_NAME
-    
+    ASSOCIATION_RULES_TABLE_NAME: str = ASSOCIATION_RULES_TABLE_NAME
+
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
     
-    # Novas constantes para Regras de Associação
     ASSOCIATION_RULES_MIN_CONFIDENCE: float = ASSOCIATION_RULES_MIN_CONFIDENCE
     ASSOCIATION_RULES_MIN_LIFT: float = ASSOCIATION_RULES_MIN_LIFT
-    ASSOCIATION_RULES_TABLE_NAME: str = ASSOCIATION_RULES_TABLE_NAME
+    
+    # Novas constantes para Análise de Linhas e Colunas
+    LOTOFACIL_GRID_LINES: Dict[str, List[int]] = LOTOFACIL_GRID_LINES
+    LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = LOTOFACIL_GRID_COLUMNS
+    GRID_LINE_DISTRIBUTION_TABLE_NAME: str = GRID_LINE_DISTRIBUTION_TABLE_NAME
+    GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = GRID_COLUMN_DISTRIBUTION_TABLE_NAME
 
 
     def __init__(self):
@@ -172,9 +196,10 @@ if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         # ... (outros prints de teste)
-        print(f"RECURRENCE_ANALYSIS_TABLE_NAME: {config_obj.RECURRENCE_ANALYSIS_TABLE_NAME}")
-        print(f"ASSOCIATION_RULES_MIN_CONFIDENCE: {config_obj.ASSOCIATION_RULES_MIN_CONFIDENCE}") # Novo print
-        print(f"ASSOCIATION_RULES_MIN_LIFT: {config_obj.ASSOCIATION_RULES_MIN_LIFT}") # Novo print
-        print(f"ASSOCIATION_RULES_TABLE_NAME: {config_obj.ASSOCIATION_RULES_TABLE_NAME}") # Novo print
+        print(f"ASSOCIATION_RULES_TABLE_NAME: {config_obj.ASSOCIATION_RULES_TABLE_NAME}")
+        print(f"LOTOFACIL_GRID_LINES L1: {config_obj.LOTOFACIL_GRID_LINES['L1']}") # Novo print
+        print(f"LOTOFACIL_GRID_COLUMNS C1: {config_obj.LOTOFACIL_GRID_COLUMNS['C1']}") # Novo print
+        print(f"GRID_LINE_DISTRIBUTION_TABLE_NAME: {config_obj.GRID_LINE_DISTRIBUTION_TABLE_NAME}") # Novo print
+        print(f"GRID_COLUMN_DISTRIBUTION_TABLE_NAME: {config_obj.GRID_COLUMN_DISTRIBUTION_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")
