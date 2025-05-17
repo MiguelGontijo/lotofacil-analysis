@@ -86,9 +86,12 @@ _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
 GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
 
-_geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30') # Variável de ambiente para janelas de M.A. de Atraso
+_geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30')
 GERAL_MA_DELAY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_delay_windows_str.split(',')]
 GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
+
+# --- Configurações para Análise de Recorrência ---
+RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis"
 
 
 class Config:
@@ -139,9 +142,11 @@ class Config:
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
     
-    # Novas constantes para Média Móvel de Atraso Geral
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
     GERAL_MA_DELAY_TABLE_NAME: str = GERAL_MA_DELAY_TABLE_NAME
+
+    # Nova constante para Análise de Recorrência
+    RECURRENCE_ANALYSIS_TABLE_NAME: str = RECURRENCE_ANALYSIS_TABLE_NAME
 
 
     def __init__(self):
@@ -167,11 +172,9 @@ except Exception as e:
 if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
-        print(f"DATA_DIR: {config_obj.DATA_DIR}")
-        print(f"DB_PATH: {config_obj.DB_PATH}")
-        print(f"GERAL_MA_FREQUENCY_WINDOWS: {config_obj.GERAL_MA_FREQUENCY_WINDOWS}")
-        print(f"GERAL_MA_FREQUENCY_TABLE_NAME: {config_obj.GERAL_MA_FREQUENCY_TABLE_NAME}")
-        print(f"GERAL_MA_DELAY_WINDOWS: {config_obj.GERAL_MA_DELAY_WINDOWS}") # Novo print
-        print(f"GERAL_MA_DELAY_TABLE_NAME: {config_obj.GERAL_MA_DELAY_TABLE_NAME}") # Novo print
+        # ... (outros prints de teste)
+        print(f"GERAL_MA_DELAY_WINDOWS: {config_obj.GERAL_MA_DELAY_WINDOWS}")
+        print(f"GERAL_MA_DELAY_TABLE_NAME: {config_obj.GERAL_MA_DELAY_TABLE_NAME}")
+        print(f"RECURRENCE_ANALYSIS_TABLE_NAME: {config_obj.RECURRENCE_ANALYSIS_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")

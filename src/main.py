@@ -16,7 +16,6 @@ from src.analysis.combination_analysis import CombinationAnalyzer
 from src.pipeline_steps.execute_frequency import run_frequency_analysis
 from src.pipeline_steps.execute_delay import run_delay_analysis
 from src.pipeline_steps.execute_max_delay import run_max_delay_analysis_step
-# Import da etapa de análise posicional (anteriormente adicionada)
 from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
 from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_frequent_itemsets import run_frequent_itemsets_analysis_step
@@ -27,8 +26,9 @@ from src.pipeline_steps.execute_cycle_progression import run_cycle_progression_a
 from src.pipeline_steps.execute_detailed_cycle_metrics import run_detailed_cycle_metrics_step
 from src.pipeline_steps.execute_properties import run_number_properties_analysis
 from src.pipeline_steps.execute_repetition_analysis import run_repetition_analysis_step
-# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE TEMPORAL
 from src.pipeline_steps.execute_temporal_trend_analysis import run_temporal_trend_analysis_step
+# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE DE RECORRÊNCIA
+from src.pipeline_steps.execute_recurrence_analysis import run_recurrence_analysis_step
 from src.pipeline_steps.execute_chunk_evolution_analysis import run_chunk_evolution_analysis_step
 from src.pipeline_steps.execute_block_aggregation import run_block_aggregation_step
 from src.pipeline_steps.execute_rank_trend_analysis import run_rank_trend_analysis_step
@@ -89,7 +89,7 @@ def main():
         logger.info(f"{len(main_all_data_df)} sorteios carregados para análise.")
         
         db_manager = DatabaseManager(db_path=config_obj.DB_PATH)
-        db_manager._create_all_tables() # Garante que todas as tabelas sejam criadas
+        db_manager._create_all_tables() 
         logger.info("Verificação e criação de tabelas do banco de dados concluída pelo main.")
 
         combination_analyzer = CombinationAnalyzer(all_numbers=config_obj.ALL_NUMBERS)
@@ -108,7 +108,9 @@ def main():
             {"name": "delay_analysis", "func": run_delay_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "max_delay_analysis", "func": run_max_delay_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "positional_analysis", "func": run_positional_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            
+            # NOVA ETAPA DE ANÁLISE DE RECORRÊNCIA ADICIONADA AQUI
+            {"name": "recurrence_analysis", "func": run_recurrence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+
             # Análises de Relações e Conjuntos
             {"name": "pair_analysis", "func": run_pair_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
             {"name": "frequent_itemsets_analysis", "func": run_frequent_itemsets_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
@@ -124,7 +126,6 @@ def main():
             
             # Análises de Evolução Temporal e Blocos
             {"name": "repetition_analysis", "func": run_repetition_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            # ADIÇÃO DA NOVA ETAPA DE ANÁLISE TEMPORAL (MÉDIA MÓVEL)
             {"name": "temporal_trend_analysis", "func": run_temporal_trend_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "chunk_evolution_analysis", "func": run_chunk_evolution_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             
