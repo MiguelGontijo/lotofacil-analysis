@@ -80,18 +80,20 @@ SEQUENCE_METRICS_TABLE_NAME = "sequence_metrics"
 FREQUENT_ITEMSETS_TABLE_NAME = "frequent_itemsets"
 FREQUENT_ITEMSET_METRICS_TABLE_NAME = "frequent_itemset_metrics"
 DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency"
+GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency" # Mantido da etapa anterior
+GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay" # Mantido da etapa anterior
+RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis" # Mantido da etapa anterior
 
-# --- Configurações para Médias Móveis Gerais ---
+# --- Configurações para Médias Móveis Gerais --- (Mantidas da etapa anterior)
 _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
-GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
-
 _geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30')
 GERAL_MA_DELAY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_delay_windows_str.split(',')]
-GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
 
-# --- Configurações para Análise de Recorrência ---
-RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis"
+# --- Configurações para Regras de Associação (Market Basket Analysis) ---
+ASSOCIATION_RULES_MIN_CONFIDENCE: float = float(os.getenv('ASSOCIATION_RULES_MIN_CONFIDENCE', '0.5'))
+ASSOCIATION_RULES_MIN_LIFT: float = float(os.getenv('ASSOCIATION_RULES_MIN_LIFT', '1.0'))
+ASSOCIATION_RULES_TABLE_NAME: str = "association_rules"
 
 
 class Config:
@@ -138,15 +140,17 @@ class Config:
     FREQUENT_ITEMSETS_TABLE_NAME = FREQUENT_ITEMSETS_TABLE_NAME
     FREQUENT_ITEMSET_METRICS_TABLE_NAME = FREQUENT_ITEMSET_METRICS_TABLE_NAME
     DRAW_POSITION_FREQUENCY_TABLE_NAME = DRAW_POSITION_FREQUENCY_TABLE_NAME
+    GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
+    GERAL_MA_DELAY_TABLE_NAME: str = GERAL_MA_DELAY_TABLE_NAME
+    RECURRENCE_ANALYSIS_TABLE_NAME: str = RECURRENCE_ANALYSIS_TABLE_NAME
     
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
-    GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
-    
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
-    GERAL_MA_DELAY_TABLE_NAME: str = GERAL_MA_DELAY_TABLE_NAME
-
-    # Nova constante para Análise de Recorrência
-    RECURRENCE_ANALYSIS_TABLE_NAME: str = RECURRENCE_ANALYSIS_TABLE_NAME
+    
+    # Novas constantes para Regras de Associação
+    ASSOCIATION_RULES_MIN_CONFIDENCE: float = ASSOCIATION_RULES_MIN_CONFIDENCE
+    ASSOCIATION_RULES_MIN_LIFT: float = ASSOCIATION_RULES_MIN_LIFT
+    ASSOCIATION_RULES_TABLE_NAME: str = ASSOCIATION_RULES_TABLE_NAME
 
 
     def __init__(self):
@@ -156,12 +160,7 @@ class Config:
         logger.info("Objeto Config instanciado. Configurações carregadas.")
         logger.debug(f"BASE_DIR: {self.BASE_DIR}")
         logger.debug(f"DATA_DIR: {self.DATA_DIR}")
-        logger.debug(f"LOG_DIR: {self.LOG_DIR}")
-        logger.debug(f"PLOT_DIR: {self.PLOT_DIR}")
-        logger.debug(f"DB_PATH: {self.DB_PATH}")
-        logger.debug(f"HISTORICO_CSV_PATH: {self.HISTORICO_CSV_PATH}")
-        logger.debug(f"CONFIG INIT: SEQUENCE_ANALYSIS_CONFIG: {self.SEQUENCE_ANALYSIS_CONFIG}")
-
+        # ... (outros logs de debug no __init__)
 
 try:
     config_obj = Config()
@@ -173,8 +172,9 @@ if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         # ... (outros prints de teste)
-        print(f"GERAL_MA_DELAY_WINDOWS: {config_obj.GERAL_MA_DELAY_WINDOWS}")
-        print(f"GERAL_MA_DELAY_TABLE_NAME: {config_obj.GERAL_MA_DELAY_TABLE_NAME}")
-        print(f"RECURRENCE_ANALYSIS_TABLE_NAME: {config_obj.RECURRENCE_ANALYSIS_TABLE_NAME}") # Novo print
+        print(f"RECURRENCE_ANALYSIS_TABLE_NAME: {config_obj.RECURRENCE_ANALYSIS_TABLE_NAME}")
+        print(f"ASSOCIATION_RULES_MIN_CONFIDENCE: {config_obj.ASSOCIATION_RULES_MIN_CONFIDENCE}") # Novo print
+        print(f"ASSOCIATION_RULES_MIN_LIFT: {config_obj.ASSOCIATION_RULES_MIN_LIFT}") # Novo print
+        print(f"ASSOCIATION_RULES_TABLE_NAME: {config_obj.ASSOCIATION_RULES_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")

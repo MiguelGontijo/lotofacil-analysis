@@ -17,8 +17,11 @@ from src.pipeline_steps.execute_frequency import run_frequency_analysis
 from src.pipeline_steps.execute_delay import run_delay_analysis
 from src.pipeline_steps.execute_max_delay import run_max_delay_analysis_step
 from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
+from src.pipeline_steps.execute_recurrence_analysis import run_recurrence_analysis_step
 from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_frequent_itemsets import run_frequent_itemsets_analysis_step
+# IMPORTAÇÃO DA NOVA ETAPA DE REGRAS DE ASSOCIAÇÃO
+from src.pipeline_steps.execute_association_rules import run_association_rules_step
 from src.pipeline_steps.execute_frequent_itemset_metrics import run_frequent_itemset_metrics_step
 from src.pipeline_steps.execute_cycles import run_cycle_identification_step
 from src.pipeline_steps.execute_cycle_stats import run_cycle_stats_step
@@ -27,8 +30,6 @@ from src.pipeline_steps.execute_detailed_cycle_metrics import run_detailed_cycle
 from src.pipeline_steps.execute_properties import run_number_properties_analysis
 from src.pipeline_steps.execute_repetition_analysis import run_repetition_analysis_step
 from src.pipeline_steps.execute_temporal_trend_analysis import run_temporal_trend_analysis_step
-# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE DE RECORRÊNCIA
-from src.pipeline_steps.execute_recurrence_analysis import run_recurrence_analysis_step
 from src.pipeline_steps.execute_chunk_evolution_analysis import run_chunk_evolution_analysis_step
 from src.pipeline_steps.execute_block_aggregation import run_block_aggregation_step
 from src.pipeline_steps.execute_rank_trend_analysis import run_rank_trend_analysis_step
@@ -98,7 +99,7 @@ def main():
             "config": config_obj,
             "db_manager": db_manager,
             "all_data_df": main_all_data_df, 
-            "combination_analyzer": combination_analyzer
+            "combination_analyzer": combination_analyzer # Adicionado ao contexto
         }
         shared_context_for_orchestrator["shared_context"] = shared_context_for_orchestrator
 
@@ -108,13 +109,14 @@ def main():
             {"name": "delay_analysis", "func": run_delay_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "max_delay_analysis", "func": run_max_delay_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "positional_analysis", "func": run_positional_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            # NOVA ETAPA DE ANÁLISE DE RECORRÊNCIA ADICIONADA AQUI
             {"name": "recurrence_analysis", "func": run_recurrence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
 
             # Análises de Relações e Conjuntos
             {"name": "pair_analysis", "func": run_pair_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
             {"name": "frequent_itemsets_analysis", "func": run_frequent_itemsets_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
-            {"name": "frequent_itemset_metrics_analysis", "func": run_frequent_itemset_metrics_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            # A ETAPA DE REGRAS DE ASSOCIAÇÃO DEVE VIR APÓS 'frequent_itemsets_analysis'
+            {"name": "association_rules", "func": run_association_rules_step, "args": ["db_manager", "combination_analyzer", "config", "shared_context"]},
+            {"name": "frequent_itemset_metrics_analysis", "func": run_frequent_itemset_metrics_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]}, # Pode depender de frequent_itemsets
             {"name": "number_properties", "func": run_number_properties_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "sequence_analysis", "func": run_sequence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             
