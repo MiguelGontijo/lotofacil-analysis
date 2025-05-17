@@ -85,7 +85,10 @@ DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency"
 _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
 GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
-# Adicionaremos GERAL_MA_DELAY_WINDOWS e GERAL_MA_DELAY_TABLE_NAME quando formos implementar a média móvel de atraso.
+
+_geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30') # Variável de ambiente para janelas de M.A. de Atraso
+GERAL_MA_DELAY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_delay_windows_str.split(',')]
+GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
 
 
 class Config:
@@ -133,9 +136,12 @@ class Config:
     FREQUENT_ITEMSET_METRICS_TABLE_NAME = FREQUENT_ITEMSET_METRICS_TABLE_NAME
     DRAW_POSITION_FREQUENCY_TABLE_NAME = DRAW_POSITION_FREQUENCY_TABLE_NAME
     
-    # Novas constantes para Média Móvel de Frequência Geral
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
+    
+    # Novas constantes para Média Móvel de Atraso Geral
+    GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
+    GERAL_MA_DELAY_TABLE_NAME: str = GERAL_MA_DELAY_TABLE_NAME
 
 
     def __init__(self):
@@ -165,5 +171,7 @@ if __name__ == '__main__':
         print(f"DB_PATH: {config_obj.DB_PATH}")
         print(f"GERAL_MA_FREQUENCY_WINDOWS: {config_obj.GERAL_MA_FREQUENCY_WINDOWS}")
         print(f"GERAL_MA_FREQUENCY_TABLE_NAME: {config_obj.GERAL_MA_FREQUENCY_TABLE_NAME}")
+        print(f"GERAL_MA_DELAY_WINDOWS: {config_obj.GERAL_MA_DELAY_WINDOWS}") # Novo print
+        print(f"GERAL_MA_DELAY_TABLE_NAME: {config_obj.GERAL_MA_DELAY_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")

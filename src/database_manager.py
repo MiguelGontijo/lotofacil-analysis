@@ -143,6 +143,7 @@ class DatabaseManager:
         self._create_table_sequence_metrics()
         self._create_table_draw_position_frequency() 
         self._create_table_geral_ma_frequency()
+        self._create_table_geral_ma_delay() # Nova chamada
 
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
@@ -188,9 +189,6 @@ class DatabaseManager:
         logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
 
     def _create_table_geral_ma_frequency(self) -> None:
-        """
-        Cria a tabela para armazenar a média móvel geral da frequência de ocorrência das dezenas.
-        """
         query = """
         CREATE TABLE IF NOT EXISTS geral_ma_frequency (
             Concurso INTEGER NOT NULL,
@@ -202,6 +200,22 @@ class DatabaseManager:
         """
         self._execute_query(query, commit=True)
         logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
+
+    def _create_table_geral_ma_delay(self) -> None:
+        """
+        Cria a tabela para armazenar a média móvel geral do atraso atual das dezenas.
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS geral_ma_delay (
+            Concurso INTEGER NOT NULL,
+            Dezena INTEGER NOT NULL,
+            Janela INTEGER NOT NULL,
+            MA_Atraso REAL, -- Média Móvel do Atraso Atual Histórico
+            PRIMARY KEY (Concurso, Dezena, Janela)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
 
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
@@ -376,15 +390,20 @@ if __name__ == '__main__':
         
         logger.info(f"Tabelas no banco de dados: {db_m.get_table_names()}")
 
-        if db_m.table_exists('draw_position_frequency'): # Verificação da etapa anterior
-            logger.info("Teste: Tabela 'draw_position_frequency' existe.")
-        else:
-            logger.error("Teste: Tabela 'draw_position_frequency' NÃO existe.")
-        
-        if db_m.table_exists('geral_ma_frequency'): # Nova verificação
-            logger.info("Teste: Tabela 'geral_ma_frequency' existe.")
-        else:
-            logger.error("Teste: Tabela 'geral_ma_frequency' NÃO existe.")
+        # Verificações de tabelas existentes e novas
+        tables_to_check = [
+            'draw_position_frequency', 
+            'geral_ma_frequency',
+            'geral_ma_delay' # Nova verificação
+        ]
+        for table_name in tables_to_check:
+            if db_m.table_exists(table_name):
+                logger.info(f"Teste: Tabela '{table_name}' existe.")
+            else:
+                # Se for a tabela que acabamos de adicionar e ela não existir, é um erro.
+                # Para outras, pode ser um aviso se o teste não as cria explicitamente.
+                # Aqui, esperamos que _create_all_tables crie todas.
+                logger.error(f"Teste: Tabela '{table_name}' NÃO existe após _create_all_tables.")
 
         test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
         db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')

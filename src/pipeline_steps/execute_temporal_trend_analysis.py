@@ -3,8 +3,13 @@ import logging
 import pandas as pd
 from typing import Any, Dict # Para os type hints dos argumentos
 
-# Importa as funções de análise do novo módulo
-from src.analysis.temporal_trend_analysis import get_full_draw_matrix, calculate_moving_average_frequency
+# Importa as funções de análise do módulo de tendências temporais
+from src.analysis.temporal_trend_analysis import (
+    get_full_draw_matrix, 
+    calculate_moving_average_frequency,
+    get_historical_delay_matrix,      # Nova importação
+    calculate_moving_average_delay    # Nova importação
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,23 +21,15 @@ def run_temporal_trend_analysis_step(
     **kwargs
 ) -> bool:
     """
-    Executa a etapa de análise de tendências temporais, começando com a
-    Média Móvel de Frequência Geral.
+    Executa a etapa de análise de tendências temporais, incluindo:
+    1. Média Móvel de Frequência Geral.
+    2. Média Móvel de Atraso (Atual Instantâneo) Geral.
     Os argumentos são injetados pelo Orchestrator.
     """
-    step_name = "Análise de Tendências Temporais (Média Móvel de Frequência)"
+    step_name = "Análise de Tendências Temporais (Médias Móveis)" # Nome da etapa atualizado
     logger.info(f"==== Iniciando Etapa: {step_name} ====")
     
-    # Validações básicas dos argumentos injetados (opcional, mas bom para robustez)
-    if not hasattr(config, 'GERAL_MA_FREQUENCY_WINDOWS') or \
-       not hasattr(config, 'GERAL_MA_FREQUENCY_TABLE_NAME') or \
-       not hasattr(config, 'CONTEST_ID_COLUMN_NAME') or \
-       not hasattr(config, 'DRAWN_NUMBERS_COLUMN_NAME') or \
-       not hasattr(config, 'ALL_NUMBERS'):
-        logger.error("Atributos de configuração necessários para a análise de média móvel de frequência não encontrados.")
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
-        return False
-
+    # Validações básicas dos argumentos injetados
     if not isinstance(all_data_df, pd.DataFrame) or all_data_df.empty:
         logger.error("DataFrame de sorteios (all_data_df) injetado está inválido ou vazio.")
         logger.info(f"==== Etapa: {step_name} FALHOU ====")
@@ -43,60 +40,112 @@ def run_temporal_trend_analysis_step(
         logger.info(f"==== Etapa: {step_name} FALHOU ====")
         return False
 
-    geral_ma_frequency_table_name = config.GERAL_MA_FREQUENCY_TABLE_NAME
-    windows = config.GERAL_MA_FREQUENCY_WINDOWS
+    if not config:
+        logger.error("Objeto config não foi injetado corretamente.")
+        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+        return False
 
+    # --- Média Móvel de Frequência ---
     try:
-        # 1. Gerar a matriz de ocorrências
-        logger.info("Gerando matriz completa de sorteios para análise de média móvel...")
+        logger.info("--- Iniciando sub-etapa: Média Móvel de Frequência ---")
+        if not hasattr(config, 'GERAL_MA_FREQUENCY_WINDOWS') or \
+           not hasattr(config, 'GERAL_MA_FREQUENCY_TABLE_NAME'):
+            logger.error("Atributos de configuração para M.A. de Frequência não encontrados.")
+            raise AttributeError("Configuração para M.A. de Frequência ausente.")
+
+        geral_ma_frequency_table_name = config.GERAL_MA_FREQUENCY_TABLE_NAME
+        freq_windows = config.GERAL_MA_FREQUENCY_WINDOWS
+
+        logger.info("Gerando matriz completa de sorteios (ocorrências)...")
         draw_matrix = get_full_draw_matrix(all_data_df, config)
 
         if draw_matrix.empty:
-            logger.warning("Matriz de sorteios gerada está vazia. Não é possível calcular médias móveis.")
-            # Considerar se isso deve ser uma falha da etapa ou apenas um aviso.
-            # Se draw_matrix vazia for um estado esperado (ex: all_data_df vazio já tratado),
-            # então talvez apenas logar e retornar True. Mas se all_data_df não era vazio,
-            # uma draw_matrix vazia indica um problema em get_full_draw_matrix.
-            # A função get_full_draw_matrix já loga se all_data_df for vazio.
-            # Se all_data_df não é vazio mas draw_matrix é, é um problema.
             if not all_data_df.empty:
-                 logger.error("Falha ao gerar a matriz de sorteios a partir de dados não vazios.")
-                 logger.info(f"==== Etapa: {step_name} FALHOU ====")
-                 return False
-            else: # all_data_df estava vazio, get_full_draw_matrix retornou vazio, o que é esperado.
-                 logger.info("Dados de entrada vazios, nenhuma média móvel de frequência para calcular.")
-                 logger.info(f"==== Etapa: {step_name} CONCLUÍDA (sem dados) ====")
-                 return True
-
-
-        # 2. Calcular a Média Móvel da Frequência
-        logger.info(f"Calculando média móvel de frequência para janelas: {windows}...")
-        ma_frequency_df = calculate_moving_average_frequency(draw_matrix, windows, config)
-
-        if not isinstance(ma_frequency_df, pd.DataFrame):
-            logger.error("A análise de média móvel de frequência não retornou um DataFrame.")
-            logger.info(f"==== Etapa: {step_name} FALHOU ====")
-            return False
-        
-        if ma_frequency_df.empty and not draw_matrix.empty:
-            logger.warning("A análise de média móvel de frequência resultou em um DataFrame vazio, embora a matriz de entrada não estivesse vazia.")
-        
-        # 3. Salvar os resultados
-        if ma_frequency_df.empty:
-            logger.info(f"DataFrame de média móvel de frequência está vazio. Nada será salvo na tabela '{geral_ma_frequency_table_name}'.")
+                 logger.error("Falha ao gerar a matriz de sorteios (ocorrências) a partir de dados não vazios.")
+                 raise ValueError("Matriz de ocorrências não pôde ser gerada.")
+            else:
+                 logger.info("Dados de entrada vazios, nenhuma M.A. de Frequência para calcular.")
         else:
-            db_manager.save_dataframe(ma_frequency_df, 
-                                      geral_ma_frequency_table_name, 
-                                      if_exists='replace')
-            logger.info(f"Média móvel de frequência salva na tabela: {geral_ma_frequency_table_name}")
-        
-        # Adicionar ao contexto compartilhado, se necessário para etapas futuras
-        shared_context['geral_ma_frequency_df'] = ma_frequency_df
-        logger.info(f"Resultado da Média Móvel de Frequência adicionado ao dicionário shared_context como 'geral_ma_frequency_df'.")
+            logger.info(f"Calculando média móvel de frequência para janelas: {freq_windows}...")
+            ma_frequency_df = calculate_moving_average_frequency(draw_matrix, freq_windows, config)
 
-    except Exception as e:
-        logger.error(f"Erro durante a execução da {step_name}: {e}", exc_info=True)
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+            if not isinstance(ma_frequency_df, pd.DataFrame):
+                logger.error("A análise de média móvel de frequência não retornou um DataFrame.")
+                raise TypeError("Resultado inesperado da análise de M.A. de Frequência.")
+            
+            if ma_frequency_df.empty and not draw_matrix.empty:
+                logger.warning("M.A. de Frequência resultou em DataFrame vazio, embora a matriz de entrada não estivesse.")
+            
+            if ma_frequency_df.empty:
+                logger.info(f"DataFrame de M.A. de Frequência vazio. Nada salvo em '{geral_ma_frequency_table_name}'.")
+            else:
+                db_manager.save_dataframe(ma_frequency_df, geral_ma_frequency_table_name, if_exists='replace')
+                logger.info(f"M.A. de Frequência salva na tabela: {geral_ma_frequency_table_name}")
+            
+            shared_context['geral_ma_frequency_df'] = ma_frequency_df
+            logger.info("Resultado da M.A. de Frequência adicionado ao shared_context.")
+        logger.info("--- Sub-etapa: Média Móvel de Frequência CONCLUÍDA ---")
+
+    except Exception as e_freq:
+        logger.error(f"Erro durante a sub-etapa de Média Móvel de Frequência: {e_freq}", exc_info=True)
+        # Decide se a falha em uma sub-etapa deve parar toda a etapa temporal_trend_analysis
+        # Por ora, vamos continuar para a M.A. de Atraso, mas logamos o erro.
+        # Se for crítico, pode-se retornar False aqui.
+
+
+    # --- Média Móvel de Atraso (Atual Instantâneo) ---
+    # A matriz de ocorrências (draw_matrix) já foi gerada acima e pode ser reutilizada.
+    try:
+        logger.info("--- Iniciando sub-etapa: Média Móvel de Atraso ---")
+        if not hasattr(config, 'GERAL_MA_DELAY_WINDOWS') or \
+           not hasattr(config, 'GERAL_MA_DELAY_TABLE_NAME'):
+            logger.error("Atributos de configuração para M.A. de Atraso não encontrados.")
+            raise AttributeError("Configuração para M.A. de Atraso ausente.")
+
+        geral_ma_delay_table_name = config.GERAL_MA_DELAY_TABLE_NAME
+        delay_windows = config.GERAL_MA_DELAY_WINDOWS
+
+        if draw_matrix.empty: # Se a draw_matrix não pôde ser gerada antes
+            if not all_data_df.empty:
+                logger.error("Matriz de ocorrências está vazia, não é possível calcular M.A. de Atraso.")
+                raise ValueError("Matriz de ocorrências necessária para M.A. de Atraso está vazia.")
+            else:
+                logger.info("Dados de entrada vazios, nenhuma M.A. de Atraso para calcular.")
+        else:
+            logger.info("Gerando matriz de atraso histórico...")
+            historical_delay_matrix = get_historical_delay_matrix(draw_matrix, config)
+
+            if historical_delay_matrix.empty:
+                if not draw_matrix.empty:
+                    logger.error("Falha ao gerar a matriz de atraso histórico a partir de uma matriz de ocorrências não vazia.")
+                    raise ValueError("Matriz de atraso histórico não pôde ser gerada.")
+                else: # draw_matrix estava vazia, o que é esperado se all_data_df era vazio.
+                    logger.info("Matriz de ocorrências vazia, nenhuma M.A. de Atraso para calcular.")
+            else:
+                logger.info(f"Calculando média móvel de atraso para janelas: {delay_windows}...")
+                ma_delay_df = calculate_moving_average_delay(historical_delay_matrix, delay_windows, config)
+
+                if not isinstance(ma_delay_df, pd.DataFrame):
+                    logger.error("A análise de média móvel de atraso não retornou um DataFrame.")
+                    raise TypeError("Resultado inesperado da análise de M.A. de Atraso.")
+                
+                if ma_delay_df.empty and not historical_delay_matrix.empty:
+                    logger.warning("M.A. de Atraso resultou em DataFrame vazio, embora a matriz de entrada não estivesse.")
+
+                if ma_delay_df.empty:
+                    logger.info(f"DataFrame de M.A. de Atraso vazio. Nada salvo em '{geral_ma_delay_table_name}'.")
+                else:
+                    db_manager.save_dataframe(ma_delay_df, geral_ma_delay_table_name, if_exists='replace')
+                    logger.info(f"M.A. de Atraso salva na tabela: {geral_ma_delay_table_name}")
+                
+                shared_context['geral_ma_delay_df'] = ma_delay_df
+                logger.info("Resultado da M.A. de Atraso adicionado ao shared_context.")
+        logger.info("--- Sub-etapa: Média Móvel de Atraso CONCLUÍDA ---")
+
+    except Exception as e_delay:
+        logger.error(f"Erro durante a sub-etapa de Média Móvel de Atraso: {e_delay}", exc_info=True)
+        # Se esta sub-etapa falhar, a etapa geral falha.
+        logger.info(f"==== Etapa: {step_name} FALHOU (devido a erro na M.A. de Atraso) ====")
         return False
             
     logger.info(f"==== Etapa: {step_name} CONCLUÍDA ====")
