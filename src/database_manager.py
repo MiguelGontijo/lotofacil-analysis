@@ -141,6 +141,7 @@ class DatabaseManager:
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
         self._create_table_sequence_metrics()
+        self._create_table_draw_position_frequency() # <<< CHAMADA PARA O NOVO MÉTODO
 
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
@@ -160,6 +161,35 @@ class DatabaseManager:
         self._create_table_rank_geral_dezenas_por_frequencia()
         
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
+
+    def _create_table_draw_position_frequency(self) -> None:
+        """
+        Cria a tabela para armazenar a frequência de cada dezena em cada posição de sorteio.
+        'Dezena' (1-25)
+        'Posicao_1' a 'Posicao_15' (contagem de aparições da dezena naquela posição)
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS draw_position_frequency (
+            Dezena INTEGER PRIMARY KEY,
+            Posicao_1 INTEGER DEFAULT 0,
+            Posicao_2 INTEGER DEFAULT 0,
+            Posicao_3 INTEGER DEFAULT 0,
+            Posicao_4 INTEGER DEFAULT 0,
+            Posicao_5 INTEGER DEFAULT 0,
+            Posicao_6 INTEGER DEFAULT 0,
+            Posicao_7 INTEGER DEFAULT 0,
+            Posicao_8 INTEGER DEFAULT 0,
+            Posicao_9 INTEGER DEFAULT 0,
+            Posicao_10 INTEGER DEFAULT 0,
+            Posicao_11 INTEGER DEFAULT 0,
+            Posicao_12 INTEGER DEFAULT 0,
+            Posicao_13 INTEGER DEFAULT 0,
+            Posicao_14 INTEGER DEFAULT 0,
+            Posicao_15 INTEGER DEFAULT 0
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
 
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
@@ -333,6 +363,11 @@ if __name__ == '__main__':
         db_m._create_all_tables() 
         
         logger.info(f"Tabelas no banco de dados: {db_m.get_table_names()}")
+
+        if db_m.table_exists('draw_position_frequency'):
+            logger.info("Teste: Tabela 'draw_position_frequency' existe.")
+        else:
+            logger.error("Teste: Tabela 'draw_position_frequency' NÃO existe.")
 
         if db_m.table_exists('frequent_itemsets'):
             logger.info("Teste: Tabela 'frequent_itemsets' existe.")

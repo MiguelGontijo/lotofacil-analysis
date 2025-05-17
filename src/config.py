@@ -77,13 +77,19 @@ SEQUENCE_ANALYSIS_CONFIG = {
     }
     # Futuramente, podemos adicionar outros tipos de sequência aqui.
 }
+# Nomes de Tabelas (nível do módulo para referência, mas a classe Config é a fonte principal para o código)
 SEQUENCE_METRICS_TABLE_NAME = "sequence_metrics" 
+# Adicionando constantes de tabela que podem estar faltando, com base em database_manager.py
+FREQUENT_ITEMSETS_TABLE_NAME = "frequent_itemsets"
+FREQUENT_ITEMSET_METRICS_TABLE_NAME = "frequent_itemset_metrics"
+DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency" # <<< NOVA CONSTANTE ADICIONADA
+
 
 class Config:
     BASE_DIR: str = BASE_DIR
-    DATA_DIR: str = DATA_DIR # Corrigido
-    LOG_DIR: str = LOG_DIR   # Corrigido
-    PLOT_DIR: str = PLOT_DIR # Corrigido
+    DATA_DIR: str = DATA_DIR 
+    LOG_DIR: str = LOG_DIR   
+    PLOT_DIR: str = PLOT_DIR 
     PLOT_DIR_CONFIG: str = PLOT_DIR_CONFIG
 
     DB_PATH: str = DB_PATH
@@ -94,6 +100,7 @@ class Config:
     COLUMNS_TO_KEEP: List[str] = COLUMNS_TO_KEEP
     NEW_COLUMN_NAMES: List[str] = NEW_COLUMN_NAMES
     BALL_NUMBER_COLUMNS: List[str] = BALL_NUMBER_COLUMNS
+    # BALL_NUMBER_COLUMNS_RAW: List[str] = BALL_NUMBER_COLUMNS_RAW # Removido se não estava no original da pasta
     ALL_NUMBERS: List[int] = ALL_NUMBERS
     NUMBERS_PER_DRAW: int = NUMBERS_PER_DRAW
     DRAWN_NUMBERS_COLUMN_NAME: str = DRAWN_NUMBERS_COLUMN_NAME
@@ -115,13 +122,19 @@ class Config:
     DEFAULT_CHUNK_TYPE_FOR_PLOTTING: str = DEFAULT_CHUNK_TYPE_FOR_PLOTTING
     DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = DEFAULT_CHUNK_SIZE_FOR_PLOTTING
     DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT
-    SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG
+    
+    SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG # Atributo da classe recebe do módulo
+    
+    # Nomes de Tabelas como atributos da classe
     SEQUENCE_METRICS_TABLE_NAME = SEQUENCE_METRICS_TABLE_NAME
+    FREQUENT_ITEMSETS_TABLE_NAME = FREQUENT_ITEMSETS_TABLE_NAME
+    FREQUENT_ITEMSET_METRICS_TABLE_NAME = FREQUENT_ITEMSET_METRICS_TABLE_NAME
+    DRAW_POSITION_FREQUENCY_TABLE_NAME = DRAW_POSITION_FREQUENCY_TABLE_NAME # <<< NOVA CONSTANTE ADICIONADA À CLASSE
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
         os.makedirs(self.PLOT_DIR, exist_ok=True)
-        os.makedirs(self.DATA_DIR, exist_ok=True) # Adicionado para garantir que DATA_DIR exista
+        os.makedirs(self.DATA_DIR, exist_ok=True)
         logger.info("Objeto Config instanciado. Configurações carregadas.")
         logger.debug(f"BASE_DIR: {self.BASE_DIR}")
         logger.debug(f"DATA_DIR: {self.DATA_DIR}")
@@ -129,21 +142,27 @@ class Config:
         logger.debug(f"PLOT_DIR: {self.PLOT_DIR}")
         logger.debug(f"DB_PATH: {self.DB_PATH}")
         logger.debug(f"HISTORICO_CSV_PATH: {self.HISTORICO_CSV_PATH}")
-        logger.debug(f"CONFIG INIT: SEQUENCE_ANALYSIS_CONFIG: {self.SEQUENCE_ANALYSIS_CONFIG}") # Este log é importante
+        logger.debug(f"CONFIG INIT: SEQUENCE_ANALYSIS_CONFIG: {self.SEQUENCE_ANALYSIS_CONFIG}")
 
 
 try:
     config_obj = Config()
 except Exception as e:
-    logger.critical(f"Falha crítica ao instanciar Config: {e}", exc_info=True)
-    print(f"ERRO CRÍTICO: Falha ao instanciar Config: {e}")
+    # Este logger pode não estar configurado se a falha for muito cedo.
+    # Usar print para garantir visibilidade do erro crítico.
+    # logging.getLogger(__name__).critical(f"Falha crítica ao instanciar Config global: {e}", exc_info=True)
+    print(f"ERRO CRÍTICO: Falha ao instanciar Config global: {e}") 
     config_obj = None 
 
 if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         print(f"DATA_DIR: {config_obj.DATA_DIR}")
+        print(f"DB_PATH: {config_obj.DB_PATH}")
         print(f"HISTORICO_CSV_PATH: {config_obj.HISTORICO_CSV_PATH}")
-        # ... outros prints de teste ...
+        print(f"BALL_NUMBER_COLUMNS: {config_obj.BALL_NUMBER_COLUMNS}")
+        # print(f"BALL_NUMBER_COLUMNS_RAW: {config_obj.BALL_NUMBER_COLUMNS_RAW}") # Removido se não estava no original
+        print(f"SEQUENCE_ANALYSIS_CONFIG: {config_obj.SEQUENCE_ANALYSIS_CONFIG}")
+        print(f"DRAW_POSITION_FREQUENCY_TABLE_NAME: {config_obj.DRAW_POSITION_FREQUENCY_TABLE_NAME}")
     else:
         print("Instância config_obj não pôde ser criada.")
