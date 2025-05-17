@@ -87,23 +87,23 @@ DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency"
 RECURRENCE_ANALYSIS_TABLE_NAME: str = "geral_recurrence_analysis"
 GRID_LINE_DISTRIBUTION_TABLE_NAME: str = "grid_line_distribution"
 GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = "grid_column_distribution"
-STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = "statistical_tests_results" # NOVA CONSTANTE
+STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = "statistical_tests_results"
 
 # Médias Móveis Gerais
 GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
 GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
 
-# --- Configurações para Médias Móveis Gerais --- (Mantidas)
+# --- Configurações para Médias Móveis Gerais ---
 _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
 _geral_ma_delay_windows_str: str = os.getenv('GERAL_MA_DELAY_WINDOWS', '5,10,20,30')
 GERAL_MA_DELAY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_delay_windows_str.split(',')]
 
-# --- Configurações para Regras de Associação (Market Basket Analysis) --- (Mantidas)
+# --- Configurações para Regras de Associação (Market Basket Analysis) ---
 ASSOCIATION_RULES_MIN_CONFIDENCE: float = float(os.getenv('ASSOCIATION_RULES_MIN_CONFIDENCE', '0.5'))
 ASSOCIATION_RULES_MIN_LIFT: float = float(os.getenv('ASSOCIATION_RULES_MIN_LIFT', '1.0'))
 
-# --- Configurações para Análise de Linhas e Colunas --- (Mantidas)
+# --- Configurações para Análise de Linhas e Colunas ---
 LOTOFACIL_GRID_LINES: Dict[str, List[int]] = {
     "L1": [1, 2, 3, 4, 5], "L2": [6, 7, 8, 9, 10], "L3": [11, 12, 13, 14, 15],
     "L4": [16, 17, 18, 19, 20], "L5": [21, 22, 23, 24, 25],
@@ -112,6 +112,10 @@ LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = {
     "C1": [1, 6, 11, 16, 21], "C2": [2, 7, 12, 17, 22], "C3": [3, 8, 13, 18, 23],
     "C4": [4, 9, 14, 19, 24], "C5": [5, 10, 15, 20, 25],
 }
+
+# --- Configurações para Testes Estatísticos ---
+# Número de bins para o teste Qui-Quadrado de normalidade da soma das dezenas
+SUM_NORMALITY_TEST_BINS: int = int(os.getenv('SUM_NORMALITY_TEST_BINS', '10'))
 
 
 class Config:
@@ -164,7 +168,7 @@ class Config:
     ASSOCIATION_RULES_TABLE_NAME: str = ASSOCIATION_RULES_TABLE_NAME
     GRID_LINE_DISTRIBUTION_TABLE_NAME: str = GRID_LINE_DISTRIBUTION_TABLE_NAME
     GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = GRID_COLUMN_DISTRIBUTION_TABLE_NAME
-    STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = STATISTICAL_TESTS_RESULTS_TABLE_NAME # NOVA CONSTANTE
+    STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = STATISTICAL_TESTS_RESULTS_TABLE_NAME
 
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
@@ -175,6 +179,9 @@ class Config:
     LOTOFACIL_GRID_LINES: Dict[str, List[int]] = LOTOFACIL_GRID_LINES
     LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = LOTOFACIL_GRID_COLUMNS
     
+    # Nova constante para Testes Estatísticos
+    SUM_NORMALITY_TEST_BINS: int = SUM_NORMALITY_TEST_BINS
+
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
@@ -195,7 +202,7 @@ if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         # ... (outros prints de teste)
-        print(f"GRID_COLUMN_DISTRIBUTION_TABLE_NAME: {config_obj.GRID_COLUMN_DISTRIBUTION_TABLE_NAME}")
-        print(f"STATISTICAL_TESTS_RESULTS_TABLE_NAME: {config_obj.STATISTICAL_TESTS_RESULTS_TABLE_NAME}") # Novo print
+        print(f"STATISTICAL_TESTS_RESULTS_TABLE_NAME: {config_obj.STATISTICAL_TESTS_RESULTS_TABLE_NAME}")
+        print(f"SUM_NORMALITY_TEST_BINS: {config_obj.SUM_NORMALITY_TEST_BINS}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")
