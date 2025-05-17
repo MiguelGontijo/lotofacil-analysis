@@ -6,32 +6,31 @@ from typing import Any, Dict, List
 # Importa as funções de análise
 from src.analysis.statistical_tests_analysis import (
     perform_chi_square_test_number_frequencies,
-    perform_normality_test_for_sum_of_numbers # Nova importação
+    perform_normality_test_for_sum_of_numbers 
 )
 
 logger = logging.getLogger(__name__)
 
 def run_statistical_tests_step(
     all_data_df: pd.DataFrame,
-    db_manager: Any,  # Espera-se uma instância de DatabaseManager
-    config: Any,      # Espera-se uma instância de Config
-    shared_context: Dict[str, Any], # Dicionário de contexto compartilhado
+    db_manager: Any, 
+    config: Any,      
+    shared_context: Dict[str, Any], 
     **kwargs
 ) -> bool:
     """
     Executa a etapa de Testes Estatísticos, incluindo:
     1. Teste Qui-Quadrado para uniformidade da frequência das dezenas.
-    2. Teste de Normalidade para a soma das dezenas sorteadas.
+    2. Teste de Normalidade para a soma das dezenas sorteadas (ambos os métodos).
     Os argumentos são injetados pelo Orchestrator.
     """
-    step_name = "Testes Estatísticos" # Nome da etapa atualizado
+    step_name = "Testes Estatísticos"
     logger.info(f"==== Iniciando Etapa: {step_name} ====")
     
-    # Validações básicas
     if not hasattr(config, 'STATISTICAL_TESTS_RESULTS_TABLE_NAME') or \
        not hasattr(config, 'NUMBERS_PER_DRAW') or \
        not hasattr(config, 'ALL_NUMBERS') or \
-       not hasattr(config, 'SUM_NORMALITY_TEST_BINS'): # Nova verificação de config
+       not hasattr(config, 'SUM_NORMALITY_TEST_BINS'):
         logger.error("Atributos de configuração necessários para Testes Estatísticos não encontrados.")
         logger.info(f"==== Etapa: {step_name} FALHOU ====")
         return False
@@ -49,7 +48,7 @@ def run_statistical_tests_step(
         return False
 
     statistical_tests_table_name = config.STATISTICAL_TESTS_RESULTS_TABLE_NAME
-    all_test_results: List[Dict[str, Any]] = [] # Para armazenar resultados de múltiplos testes
+    all_test_results: List[Dict[str, Any]] = [] 
 
     # --- Teste 1: Qui-Quadrado para Frequência das Dezenas ---
     try:
@@ -86,24 +85,17 @@ def run_statistical_tests_step(
 
     except Exception as e_freq_test:
         logger.error(f"Erro durante a sub-etapa {sub_step_name_freq}: {e_freq_test}", exc_info=True)
-        # Decide se a falha em um sub-teste deve parar toda a etapa. Por ora, loga e continua.
 
     # --- Teste 2: Teste de Normalidade para a Soma das Dezenas ---
     try:
         sub_step_name_sum_norm = "Teste de Normalidade da Soma das Dezenas"
         logger.info(f"--- Iniciando sub-etapa: {sub_step_name_sum_norm} ---")
-
-        # A soma das dezenas está na tabela 'propriedades_numericas_por_concurso'
-        # A coluna é 'soma_dezenas' (confirmar o nome exato no seu number_properties_analysis.py ou DB)
-        # Vamos assumir que o nome da coluna é 'soma_dezenas'
-        # e que a tabela é 'propriedades_numericas_por_concurso'
         
-        # Tentativa de obter o nome da tabela de propriedades do config, se existir
         props_table_name = getattr(config, 'PROPRIEDADES_NUMERICAS_TABLE_NAME', 'propriedades_numericas_por_concurso')
-        sum_column_name = 'soma_dezenas' # Assumindo este nome de coluna
+        sum_column_name = 'soma_dezenas'
 
         if not db_manager.table_exists(props_table_name):
-            logger.error(f"Tabela '{props_table_name}' não existe. Etapa 'number_properties_analysis' é pré-requisito.")
+            logger.error(f"Tabela '{props_table_name}' não existe. Etapa 'number_properties' é pré-requisito.")
             raise FileNotFoundError(f"Tabela '{props_table_name}' não encontrada.")
 
         properties_df = db_manager.load_dataframe(props_table_name)
@@ -118,25 +110,31 @@ def run_statistical_tests_step(
         sum_of_numbers_series = properties_df[sum_column_name].dropna()
 
         if sum_of_numbers_series.empty or sum_of_numbers_series.nunique() < 2:
-            logger.warning(f"Série de '{sum_column_name}' está vazia ou sem variação suficiente. Pulando teste de normalidade.")
+            logger.warning(f"Série de '{sum_column_name}' está vazia ou sem variação suficiente. Pulando testes de normalidade.")
         else:
-            # Aqui você pode escolher o método ou até iterar por uma lista de métodos
-            # Por enquanto, vamos usar 'chi_square_bins' como padrão, configurável via config se desejado.
-            test_method_sum_norm = getattr(config, 'SUM_NORMALITY_TEST_METHOD', 'chi_square_bins')
-            
-            sum_normality_result = perform_normality_test_for_sum_of_numbers(
-                sum_of_numbers_series, config, method=test_method_sum_norm
+            # Teste com Qui-Quadrado (bins)
+            sum_normality_chi2_result = perform_normality_test_for_sum_of_numbers(
+                sum_of_numbers_series, config, method='chi_square_bins'
             )
-            if sum_normality_result:
-                all_test_results.append(sum_normality_result)
-                logger.info(f"Resultado do {sub_step_name_sum_norm} (método: {test_method_sum_norm}) obtido.")
+            if sum_normality_chi2_result:
+                all_test_results.append(sum_normality_chi2_result)
+                logger.info("Resultado do Teste de Normalidade da Soma (Qui-Quadrado com Bins) obtido.")
             else:
-                logger.warning(f"Falha ao obter resultado para {sub_step_name_sum_norm} (método: {test_method_sum_norm}).")
+                logger.warning("Falha ao obter resultado para Teste de Normalidade da Soma (Qui-Quadrado com Bins).")
+
+            # Teste com Kolmogorov-Smirnov
+            sum_normality_ks_result = perform_normality_test_for_sum_of_numbers(
+                sum_of_numbers_series, config, method='kolmogorov_smirnov'
+            )
+            if sum_normality_ks_result:
+                all_test_results.append(sum_normality_ks_result)
+                logger.info("Resultado do Teste de Normalidade da Soma (Kolmogorov-Smirnov) obtido.")
+            else:
+                logger.warning("Falha ao obter resultado para Teste de Normalidade da Soma (Kolmogorov-Smirnov).")
         logger.info(f"--- Sub-etapa: {sub_step_name_sum_norm} CONCLUÍDA ---")
 
     except Exception as e_sum_norm_test:
         logger.error(f"Erro durante a sub-etapa {sub_step_name_sum_norm}: {e_sum_norm_test}", exc_info=True)
-
 
     # Salvar todos os resultados de testes coletados
     if not all_test_results:
@@ -146,7 +144,7 @@ def run_statistical_tests_step(
         try:
             db_manager.save_dataframe(results_df_to_save, 
                                       statistical_tests_table_name, 
-                                      if_exists='append') # Append para múltiplos resultados de testes
+                                      if_exists='append')
             logger.info(f"Resultados dos testes estatísticos ({len(results_df_to_save)} testes) salvos na tabela: {statistical_tests_table_name}")
         except Exception as e_save:
             logger.error(f"Erro ao salvar resultados dos testes estatísticos: {e_save}", exc_info=True)
