@@ -60,6 +60,24 @@ DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = int(os.getenv('DEFAULT_CHUNK_SIZE_FOR_PLO
 _default_dezenas_plot_str: str = os.getenv('DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT', '1,7,13,19,25')
 DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = [int(d.strip()) for d in _default_dezenas_plot_str.split(',')]
 
+# -----------------------------------------------------------------------------
+# Configurações para Análise de Sequências Numéricas
+# -----------------------------------------------------------------------------
+SEQUENCE_ANALYSIS_CONFIG = {
+    "consecutive": {          
+        "min_len": 3,         
+        "max_len": 5,         
+        "active": True        
+    },
+    "arithmetic_steps": { 
+        "steps_to_check": [2, 3],
+        "min_len": 3,            
+        "max_len": 4,            
+        "active": True           
+    }
+    # Futuramente, podemos adicionar outros tipos de sequência aqui.
+}
+SEQUENCE_METRICS_TABLE_NAME = "sequence_metrics" 
 
 class Config:
     BASE_DIR: str = BASE_DIR
@@ -97,6 +115,8 @@ class Config:
     DEFAULT_CHUNK_TYPE_FOR_PLOTTING: str = DEFAULT_CHUNK_TYPE_FOR_PLOTTING
     DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = DEFAULT_CHUNK_SIZE_FOR_PLOTTING
     DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT
+    SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG
+    SEQUENCE_METRICS_TABLE_NAME = SEQUENCE_METRICS_TABLE_NAME
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
@@ -109,6 +129,7 @@ class Config:
         logger.debug(f"PLOT_DIR: {self.PLOT_DIR}")
         logger.debug(f"DB_PATH: {self.DB_PATH}")
         logger.debug(f"HISTORICO_CSV_PATH: {self.HISTORICO_CSV_PATH}")
+        logger.debug(f"CONFIG INIT: SEQUENCE_ANALYSIS_CONFIG: {self.SEQUENCE_ANALYSIS_CONFIG}") # Este log é importante
 
 
 try:

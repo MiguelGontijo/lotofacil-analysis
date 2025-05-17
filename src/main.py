@@ -30,6 +30,7 @@ from src.pipeline_steps.execute_block_aggregation import run_block_aggregation_s
 from src.pipeline_steps.execute_rank_trend_analysis import run_rank_trend_analysis_step
 from src.pipeline_steps.execute_metrics_viz import run_metrics_visualization_step
 from src.pipeline_steps.execute_chunk_evolution_visualization import run_chunk_evolution_visualization_step
+from src.pipeline_steps.execute_sequence_analysis import run_sequence_analysis_step
 
 if config_obj:
     logging.basicConfig(
@@ -108,6 +109,7 @@ def main():
             {"name": "detailed_cycle_metrics", "func": run_detailed_cycle_metrics_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "number_properties", "func": run_number_properties_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "repetition_analysis", "func": run_repetition_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            {"name": "sequence_analysis", "func": run_sequence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "chunk_evolution_analysis", "func": run_chunk_evolution_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "block_aggregation", "func": run_block_aggregation_step, "args": ["db_manager", "config", "shared_context"]},
             {"name": "rank_trend_analysis", "func": run_rank_trend_analysis_step, "args": ["db_manager", "config", "shared_context"]},

@@ -102,7 +102,6 @@ class DatabaseManager:
             if not self.cursor: 
                  logger.error(f"Cursor ainda não está ativo após tentativa de reconexão em table_exists para '{table_name}'.")
                  return False
-
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
             return self.cursor.fetchone() is not None
@@ -141,6 +140,7 @@ class DatabaseManager:
         self._create_table_pair_metrics() 
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
+        self._create_table_sequence_metrics()
 
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
@@ -172,17 +172,33 @@ class DatabaseManager:
             length INTEGER,
             support REAL,
             frequency_count INTEGER,
-            last_occurrence_contest_id INTEGER, -- <<< COLUNA ALTERADA AQUI
+            last_occurrence_contest_id INTEGER, 
             current_delay INTEGER,
             mean_delay REAL,
             max_delay INTEGER,
             std_dev_delay REAL,
-            occurrences_draw_ids TEXT, -- Mantido como no seu original, refere-se aos IDs dos concursos
+            occurrences_draw_ids TEXT, 
             FOREIGN KEY(itemset_str) REFERENCES frequent_itemsets(itemset_str)
         );
         """
         self._execute_query(query, commit=True)
         logger.debug("Tabela 'frequent_itemset_metrics' verificada/criada.")
+
+    def _create_table_sequence_metrics(self) -> None:
+        query = """
+        CREATE TABLE IF NOT EXISTS sequence_metrics (
+            sequence_description TEXT,
+            sequence_type TEXT,
+            length INTEGER,
+            step INTEGER,
+            specific_sequence TEXT,
+            frequency_count INTEGER,
+            support REAL,
+            PRIMARY KEY (sequence_type, length, step, specific_sequence)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'sequence_metrics' verificada/criada.")
 
     def _create_table_frequencia_absoluta(self):
         query = "CREATE TABLE IF NOT EXISTS frequencia_absoluta (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Absoluta\" INTEGER);"
@@ -327,6 +343,11 @@ if __name__ == '__main__':
             logger.info("Teste: Tabela 'frequent_itemset_metrics' existe.")
         else:
             logger.error("Teste: Tabela 'frequent_itemset_metrics' NÃO existe.")
+        
+        if db_m.table_exists('sequence_metrics'): 
+            logger.info("Teste: Tabela 'sequence_metrics' existe.")
+        else:
+            logger.error("Teste: Tabela 'sequence_metrics' NÃO existe.")
 
         test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
         db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')
