@@ -8,10 +8,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # --- Definições de Constantes no Nível do Módulo ---
-BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Raiz do projeto Lotofacil_Analysis/
-# CORREÇÃO AQUI: DATA_DIR deve ser diretamente sob BASE_DIR
+BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR: str = os.path.join(BASE_DIR, 'Data')
-LOG_DIR: str = os.path.join(BASE_DIR, 'Logs') # Assumindo Logs/ na raiz do projeto também
+LOG_DIR: str = os.path.join(BASE_DIR, 'Logs')
 PLOT_DIR: str = os.path.join(BASE_DIR, 'Plots')
 
 PLOT_DIR_CONFIG: str = os.getenv('PLOT_DIR', PLOT_DIR)
@@ -28,7 +27,7 @@ _ball_number_columns_str: str = os.getenv('BALL_NUMBER_COLUMNS', 'ball_1,ball_2,
 BALL_NUMBER_COLUMNS: List[str] = [col.strip() for col in _ball_number_columns_str.split(',')]
 
 DB_NAME: str = os.getenv('DB_NAME', 'lotofacil.db')
-DB_PATH: str = os.path.join(DATA_DIR, DB_NAME) # Banco de dados dentro da pasta Data/
+DB_PATH: str = os.path.join(DATA_DIR, DB_NAME)
 
 HISTORICO_CSV_FILENAME: str = RAW_DATA_FILE_NAME
 HISTORICO_CSV_PATH: str = os.path.join(DATA_DIR, HISTORICO_CSV_FILENAME)
@@ -75,21 +74,25 @@ SEQUENCE_ANALYSIS_CONFIG = {
         "max_len": 4,            
         "active": True           
     }
-    # Futuramente, podemos adicionar outros tipos de sequência aqui.
 }
-# Nomes de Tabelas (nível do módulo para referência, mas a classe Config é a fonte principal para o código)
+# Nomes de Tabelas
 SEQUENCE_METRICS_TABLE_NAME = "sequence_metrics" 
-# Adicionando constantes de tabela que podem estar faltando, com base em database_manager.py
 FREQUENT_ITEMSETS_TABLE_NAME = "frequent_itemsets"
 FREQUENT_ITEMSET_METRICS_TABLE_NAME = "frequent_itemset_metrics"
-DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency" # <<< NOVA CONSTANTE ADICIONADA
+DRAW_POSITION_FREQUENCY_TABLE_NAME = "draw_position_frequency"
+
+# --- Configurações para Médias Móveis Gerais ---
+_geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
+GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
+GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
+# Adicionaremos GERAL_MA_DELAY_WINDOWS e GERAL_MA_DELAY_TABLE_NAME quando formos implementar a média móvel de atraso.
 
 
 class Config:
     BASE_DIR: str = BASE_DIR
-    DATA_DIR: str = DATA_DIR 
-    LOG_DIR: str = LOG_DIR   
-    PLOT_DIR: str = PLOT_DIR 
+    DATA_DIR: str = DATA_DIR
+    LOG_DIR: str = LOG_DIR
+    PLOT_DIR: str = PLOT_DIR
     PLOT_DIR_CONFIG: str = PLOT_DIR_CONFIG
 
     DB_PATH: str = DB_PATH
@@ -100,14 +103,13 @@ class Config:
     COLUMNS_TO_KEEP: List[str] = COLUMNS_TO_KEEP
     NEW_COLUMN_NAMES: List[str] = NEW_COLUMN_NAMES
     BALL_NUMBER_COLUMNS: List[str] = BALL_NUMBER_COLUMNS
-    # BALL_NUMBER_COLUMNS_RAW: List[str] = BALL_NUMBER_COLUMNS_RAW # Removido se não estava no original da pasta
     ALL_NUMBERS: List[int] = ALL_NUMBERS
     NUMBERS_PER_DRAW: int = NUMBERS_PER_DRAW
     DRAWN_NUMBERS_COLUMN_NAME: str = DRAWN_NUMBERS_COLUMN_NAME
     CONTEST_ID_COLUMN_NAME: str = CONTEST_ID_COLUMN_NAME
     DATE_COLUMN_NAME: str = DATE_COLUMN_NAME
     CHUNK_TYPES_CONFIG: Dict[str, List[int]] = CHUNK_TYPES_CONFIG
-    CHUNK_TYPES: Dict[str, List[int]] = CHUNK_TYPES_CONFIG # Alias
+    CHUNK_TYPES: Dict[str, List[int]] = CHUNK_TYPES_CONFIG
 
     FREQUENCY_TOP_N_HOT: int = int(os.getenv('FREQUENCY_TOP_N_HOT', '5'))
     FREQUENCY_BOTTOM_N_COLD: int = int(os.getenv('FREQUENCY_BOTTOM_N_COLD', '5'))
@@ -123,13 +125,18 @@ class Config:
     DEFAULT_CHUNK_SIZE_FOR_PLOTTING: int = DEFAULT_CHUNK_SIZE_FOR_PLOTTING
     DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT: List[int] = DEFAULT_DEZENAS_FOR_CHUNK_EVOLUTION_PLOT
     
-    SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG # Atributo da classe recebe do módulo
+    SEQUENCE_ANALYSIS_CONFIG = SEQUENCE_ANALYSIS_CONFIG
     
     # Nomes de Tabelas como atributos da classe
     SEQUENCE_METRICS_TABLE_NAME = SEQUENCE_METRICS_TABLE_NAME
     FREQUENT_ITEMSETS_TABLE_NAME = FREQUENT_ITEMSETS_TABLE_NAME
     FREQUENT_ITEMSET_METRICS_TABLE_NAME = FREQUENT_ITEMSET_METRICS_TABLE_NAME
-    DRAW_POSITION_FREQUENCY_TABLE_NAME = DRAW_POSITION_FREQUENCY_TABLE_NAME # <<< NOVA CONSTANTE ADICIONADA À CLASSE
+    DRAW_POSITION_FREQUENCY_TABLE_NAME = DRAW_POSITION_FREQUENCY_TABLE_NAME
+    
+    # Novas constantes para Média Móvel de Frequência Geral
+    GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
+    GERAL_MA_FREQUENCY_TABLE_NAME: str = GERAL_MA_FREQUENCY_TABLE_NAME
+
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
@@ -148,9 +155,6 @@ class Config:
 try:
     config_obj = Config()
 except Exception as e:
-    # Este logger pode não estar configurado se a falha for muito cedo.
-    # Usar print para garantir visibilidade do erro crítico.
-    # logging.getLogger(__name__).critical(f"Falha crítica ao instanciar Config global: {e}", exc_info=True)
     print(f"ERRO CRÍTICO: Falha ao instanciar Config global: {e}") 
     config_obj = None 
 
@@ -159,10 +163,7 @@ if __name__ == '__main__':
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         print(f"DATA_DIR: {config_obj.DATA_DIR}")
         print(f"DB_PATH: {config_obj.DB_PATH}")
-        print(f"HISTORICO_CSV_PATH: {config_obj.HISTORICO_CSV_PATH}")
-        print(f"BALL_NUMBER_COLUMNS: {config_obj.BALL_NUMBER_COLUMNS}")
-        # print(f"BALL_NUMBER_COLUMNS_RAW: {config_obj.BALL_NUMBER_COLUMNS_RAW}") # Removido se não estava no original
-        print(f"SEQUENCE_ANALYSIS_CONFIG: {config_obj.SEQUENCE_ANALYSIS_CONFIG}")
-        print(f"DRAW_POSITION_FREQUENCY_TABLE_NAME: {config_obj.DRAW_POSITION_FREQUENCY_TABLE_NAME}")
+        print(f"GERAL_MA_FREQUENCY_WINDOWS: {config_obj.GERAL_MA_FREQUENCY_WINDOWS}")
+        print(f"GERAL_MA_FREQUENCY_TABLE_NAME: {config_obj.GERAL_MA_FREQUENCY_TABLE_NAME}")
     else:
         print("Instância config_obj não pôde ser criada.")

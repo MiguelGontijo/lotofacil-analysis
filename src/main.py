@@ -16,6 +16,8 @@ from src.analysis.combination_analysis import CombinationAnalyzer
 from src.pipeline_steps.execute_frequency import run_frequency_analysis
 from src.pipeline_steps.execute_delay import run_delay_analysis
 from src.pipeline_steps.execute_max_delay import run_max_delay_analysis_step
+# Import da etapa de análise posicional (anteriormente adicionada)
+from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
 from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_frequent_itemsets import run_frequent_itemsets_analysis_step
 from src.pipeline_steps.execute_frequent_itemset_metrics import run_frequent_itemset_metrics_step
@@ -25,7 +27,8 @@ from src.pipeline_steps.execute_cycle_progression import run_cycle_progression_a
 from src.pipeline_steps.execute_detailed_cycle_metrics import run_detailed_cycle_metrics_step
 from src.pipeline_steps.execute_properties import run_number_properties_analysis
 from src.pipeline_steps.execute_repetition_analysis import run_repetition_analysis_step
-from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
+# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE TEMPORAL
+from src.pipeline_steps.execute_temporal_trend_analysis import run_temporal_trend_analysis_step
 from src.pipeline_steps.execute_chunk_evolution_analysis import run_chunk_evolution_analysis_step
 from src.pipeline_steps.execute_block_aggregation import run_block_aggregation_step
 from src.pipeline_steps.execute_rank_trend_analysis import run_rank_trend_analysis_step
@@ -43,7 +46,6 @@ if config_obj:
         ]
     )
 else:
-    # Fallback logging
     logging.basicConfig(level="INFO", format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
     logging.critical("Falha ao carregar config_obj. Usando logging de fallback.")
 
@@ -68,7 +70,7 @@ def main():
         raw_file_path = os.path.join(config_obj.DATA_DIR, config_obj.RAW_DATA_FILE_NAME)
         cleaned_pickle_path = os.path.join(config_obj.DATA_DIR, config_obj.CLEANED_DATA_FILE_NAME)
 
-        args_temp, _ = parser.parse_known_args() 
+        args_temp, _ = parser.parse_known_args()
         force_reload_data = args_temp.force_reload
             
         if not force_reload_data:
@@ -87,11 +89,7 @@ def main():
         logger.info(f"{len(main_all_data_df)} sorteios carregados para análise.")
         
         db_manager = DatabaseManager(db_path=config_obj.DB_PATH)
-        # A criação de tabelas é feita no __init__ do DatabaseManager se o _create_all_tables for chamado lá,
-        # ou precisa ser chamada explicitamente aqui se não for.
-        # No database_manager.py fornecido, _create_all_tables não é chamado no __init__.
-        # Vamos chamar explicitamente após a instanciação para garantir que todas as tabelas, incluindo a nova, sejam criadas.
-        db_manager._create_all_tables()
+        db_manager._create_all_tables() # Garante que todas as tabelas sejam criadas
         logger.info("Verificação e criação de tabelas do banco de dados concluída pelo main.")
 
         combination_analyzer = CombinationAnalyzer(all_numbers=config_obj.ALL_NUMBERS)
@@ -102,9 +100,8 @@ def main():
             "all_data_df": main_all_data_df, 
             "combination_analyzer": combination_analyzer
         }
-        shared_context_for_orchestrator["shared_context"] = shared_context_for_orchestrator # Para auto-referência se necessário
+        shared_context_for_orchestrator["shared_context"] = shared_context_for_orchestrator
 
-        # Definição do Pipeline de Análise Principal
         main_analysis_pipeline_config: List[Dict[str, Any]] = [
             # Análises Fundamentais (Dezenas Individuais)
             {"name": "frequency_analysis", "func": run_frequency_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
@@ -127,14 +124,15 @@ def main():
             
             # Análises de Evolução Temporal e Blocos
             {"name": "repetition_analysis", "func": run_repetition_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            # ADIÇÃO DA NOVA ETAPA DE ANÁLISE TEMPORAL (MÉDIA MÓVEL)
+            {"name": "temporal_trend_analysis", "func": run_temporal_trend_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "chunk_evolution_analysis", "func": run_chunk_evolution_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             
             # Agregação e Ranking (dependem de outras análises já terem populado o BD)
-            {"name": "block_aggregation", "func": run_block_aggregation_step, "args": ["db_manager", "config", "shared_context"]}, # Depende de chunk_evolution
-            {"name": "rank_trend_analysis", "func": run_rank_trend_analysis_step, "args": ["db_manager", "config", "shared_context"]}, # Depende de block_aggregation e frequencias
+            {"name": "block_aggregation", "func": run_block_aggregation_step, "args": ["db_manager", "config", "shared_context"]}, 
+            {"name": "rank_trend_analysis", "func": run_rank_trend_analysis_step, "args": ["db_manager", "config", "shared_context"]},
         ]
 
-        # Definição do Pipeline de Visualização
         visualization_pipeline_config: List[Dict[str, Any]] = [
              {"name": "metrics_visualization", "func": run_metrics_visualization_step, "args": ["db_manager", "config", "shared_context"]},
              {"name": "chunk_evolution_visualization", "func": run_chunk_evolution_visualization_step, "args": ["db_manager", "config", "shared_context"]}
@@ -142,11 +140,11 @@ def main():
         
         all_analysis_step_names = [step_config["name"] for step_config in main_analysis_pipeline_config]
         all_viz_step_names = [step_config["name"] for step_config in visualization_pipeline_config]
-        # Atualiza available_steps_for_argparse para incluir o novo step se ele ainda não estiver
+        
         available_steps_for_argparse = ["all_analysis"] + all_analysis_step_names + all_viz_step_names 
         
         parser.add_argument(
-            "--run-steps", nargs='+', choices=list(set(available_steps_for_argparse)), # Usa set para garantir unicidade
+            "--run-steps", nargs='+', choices=list(set(available_steps_for_argparse)),
             help=(f"Execute etapas específicas. Use 'all_analysis' para todas as análises principais. Disponíveis: {', '.join(sorted(list(set(available_steps_for_argparse))))}")
         )
         args = parser.parse_args() 
@@ -162,7 +160,7 @@ def main():
                 for step_name in requested_steps:
                     found_step_config = next((sc for sc in all_available_step_configs if sc["name"] == step_name), None)
                     if found_step_config: 
-                        if found_step_config not in pipeline_to_run_config: # Evitar duplicatas se nome repetido
+                        if found_step_config not in pipeline_to_run_config:
                            pipeline_to_run_config.append(found_step_config)
                     else: 
                         logger.warning(f"Step '{step_name}' não reconhecido e será ignorado.")
@@ -172,7 +170,7 @@ def main():
         else: 
             logger.info("Nenhuma ação especificada (ex: --run-steps ou --force-reload com intenção de recalcular). Use --help para opções.")
             parser.print_help()
-            if db_manager: db_manager.close() # Fecha a conexão se sair aqui
+            if db_manager: db_manager.close()
             return
 
         if pipeline_to_run_config:

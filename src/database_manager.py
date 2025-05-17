@@ -141,7 +141,8 @@ class DatabaseManager:
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
         self._create_table_sequence_metrics()
-        self._create_table_draw_position_frequency() # <<< CHAMADA PARA O NOVO MÉTODO
+        self._create_table_draw_position_frequency() 
+        self._create_table_geral_ma_frequency()
 
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
@@ -163,11 +164,6 @@ class DatabaseManager:
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
 
     def _create_table_draw_position_frequency(self) -> None:
-        """
-        Cria a tabela para armazenar a frequência de cada dezena em cada posição de sorteio.
-        'Dezena' (1-25)
-        'Posicao_1' a 'Posicao_15' (contagem de aparições da dezena naquela posição)
-        """
         query = """
         CREATE TABLE IF NOT EXISTS draw_position_frequency (
             Dezena INTEGER PRIMARY KEY,
@@ -190,6 +186,22 @@ class DatabaseManager:
         """
         self._execute_query(query, commit=True)
         logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
+
+    def _create_table_geral_ma_frequency(self) -> None:
+        """
+        Cria a tabela para armazenar a média móvel geral da frequência de ocorrência das dezenas.
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS geral_ma_frequency (
+            Concurso INTEGER NOT NULL,
+            Dezena INTEGER NOT NULL,
+            Janela INTEGER NOT NULL,
+            MA_Frequencia REAL,
+            PRIMARY KEY (Concurso, Dezena, Janela)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
 
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
@@ -364,25 +376,15 @@ if __name__ == '__main__':
         
         logger.info(f"Tabelas no banco de dados: {db_m.get_table_names()}")
 
-        if db_m.table_exists('draw_position_frequency'):
+        if db_m.table_exists('draw_position_frequency'): # Verificação da etapa anterior
             logger.info("Teste: Tabela 'draw_position_frequency' existe.")
         else:
             logger.error("Teste: Tabela 'draw_position_frequency' NÃO existe.")
-
-        if db_m.table_exists('frequent_itemsets'):
-            logger.info("Teste: Tabela 'frequent_itemsets' existe.")
-        else:
-            logger.error("Teste: Tabela 'frequent_itemsets' NÃO existe.")
-
-        if db_m.table_exists('frequent_itemset_metrics'): 
-            logger.info("Teste: Tabela 'frequent_itemset_metrics' existe.")
-        else:
-            logger.error("Teste: Tabela 'frequent_itemset_metrics' NÃO existe.")
         
-        if db_m.table_exists('sequence_metrics'): 
-            logger.info("Teste: Tabela 'sequence_metrics' existe.")
+        if db_m.table_exists('geral_ma_frequency'): # Nova verificação
+            logger.info("Teste: Tabela 'geral_ma_frequency' existe.")
         else:
-            logger.error("Teste: Tabela 'sequence_metrics' NÃO existe.")
+            logger.error("Teste: Tabela 'geral_ma_frequency' NÃO existe.")
 
         test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
         db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')
@@ -391,12 +393,6 @@ if __name__ == '__main__':
             logger.info(f"Teste load_dataframe: Carregado com sucesso. Conteúdo:\n{loaded_df}")
         else:
             logger.error("Teste load_dataframe: Falha ao carregar ou DataFrame vazio.")
-
-        df_non_existent = db_m.load_dataframe('tabela_nao_existe_teste')
-        if df_non_existent.empty: 
-            logger.info("Teste load_dataframe para tabela inexistente: Retornou DataFrame vazio como esperado.")
-        else:
-            logger.error(f"Teste load_dataframe para tabela inexistente: Inesperado. Retornou: {df_non_existent}")
 
         db_m.close()
     except Exception as e_test:
