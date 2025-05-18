@@ -117,6 +117,20 @@ LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = {
 # Número de bins para o teste Qui-Quadrado de normalidade da soma das dezenas
 SUM_NORMALITY_TEST_BINS: int = int(os.getenv('SUM_NORMALITY_TEST_BINS', '10'))
 
+POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = {
+    "Count_Primos_Per_Draw": {
+        "column_name": "primos", 
+        "max_observed_count_for_chi2": 10 
+    },
+    "Count_Pares_Per_Draw": {
+        "column_name": "pares",
+        "max_observed_count_for_chi2": 10 
+    },
+    "Count_Impares_Per_Draw": {
+        "column_name": "impares",
+        "max_observed_count_for_chi2": 10
+    }
+}
 
 class Config:
     BASE_DIR: str = BASE_DIR
@@ -181,7 +195,7 @@ class Config:
     
     # Nova constante para Testes Estatísticos
     SUM_NORMALITY_TEST_BINS: int = SUM_NORMALITY_TEST_BINS
-
+    POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = POISSON_DISTRIBUTION_TEST_CONFIG
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
