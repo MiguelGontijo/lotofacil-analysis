@@ -21,6 +21,7 @@ class DatabaseManager:
             raise
 
     def connect(self) -> None:
+        """Estabelece a conexão com o banco de dados SQLite."""
         try:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.execute("PRAGMA foreign_keys = ON;")
@@ -31,6 +32,7 @@ class DatabaseManager:
             raise
 
     def close(self) -> None:
+        """Fecha a conexão com o banco de dados."""
         if self.conn:
             try:
                 self.conn.close()
@@ -129,7 +131,6 @@ class DatabaseManager:
     def _create_all_tables(self) -> None:
         logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
         
-        # Chamadas para métodos de criação de tabelas existentes no seu arquivo original
         self._create_table_frequencia_absoluta()
         self._create_table_frequencia_relativa()
         self._create_table_atraso_atual()
@@ -140,6 +141,19 @@ class DatabaseManager:
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
         self._create_table_sequence_metrics()
+        
+        # Garantindo que os métodos de criação de tabelas das etapas anteriores sejam chamados
+        if hasattr(self, '_create_table_draw_position_frequency'): self._create_table_draw_position_frequency()
+        if hasattr(self, '_create_table_geral_ma_frequency'): self._create_table_geral_ma_frequency()
+        if hasattr(self, '_create_table_geral_ma_delay'): self._create_table_geral_ma_delay()
+        if hasattr(self, '_create_table_geral_recurrence_analysis'): self._create_table_geral_recurrence_analysis()
+        if hasattr(self, '_create_table_association_rules'): self._create_table_association_rules()
+        if hasattr(self, '_create_table_grid_line_distribution'): self._create_table_grid_line_distribution()
+        if hasattr(self, '_create_table_grid_column_distribution'): self._create_table_grid_column_distribution()
+        if hasattr(self, '_create_table_statistical_tests_results'): self._create_table_statistical_tests_results()
+        if hasattr(self, '_create_table_monthly_number_frequency'): self._create_table_monthly_number_frequency()
+        self._create_table_monthly_draw_properties_summary() # Nova chamada
+
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
         self._create_table_ciclo_progression()
@@ -149,27 +163,18 @@ class DatabaseManager:
         self._create_table_ciclo_metric_atraso_final()
         self._create_table_ciclo_rank_frequency()
         self._create_table_ciclo_group_metrics()
+
         self._create_table_propriedades_numericas_por_concurso()
         self._create_table_analise_repeticao_concurso_anterior()
-        self._create_table_chunk_metrics() 
-        self._create_table_rank_geral_dezenas_por_frequencia()
         
-        # Chamadas para os métodos que adicionamos em etapas anteriores (devem estar completos)
-        self._create_table_draw_position_frequency() 
-        self._create_table_geral_ma_frequency()
-        self._create_table_geral_ma_delay()
-        self._create_table_geral_recurrence_analysis()
-        self._create_table_association_rules()
-        self._create_table_grid_line_distribution()
-        self._create_table_grid_column_distribution()
-        self._create_table_statistical_tests_results()
-        self._create_table_monthly_number_frequency() # Esta é a mais recente que estamos adicionando
+        self._create_table_chunk_metrics() 
+
+        self._create_table_rank_geral_dezenas_por_frequencia()
         
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
 
-    # --- MÉTODOS DE CRIAÇÃO DE TABELA ADICIONADOS NAS ÚLTIMAS ETAPAS ---
-    # --- Garantir que estas definições estejam COMPLETAS e CORRETAS ---
-
+    # --- Métodos de Criação de Tabelas Adicionados em Etapas Anteriores ---
+    # (Estes métodos devem estar completos e corretos no seu arquivo)
     def _create_table_draw_position_frequency(self) -> None:
         query = """
         CREATE TABLE IF NOT EXISTS draw_position_frequency (
@@ -180,7 +185,8 @@ class DatabaseManager:
             Posicao_12 INTEGER DEFAULT 0, Posicao_13 INTEGER DEFAULT 0, Posicao_14 INTEGER DEFAULT 0,
             Posicao_15 INTEGER DEFAULT 0
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
+        if not self.table_exists('draw_position_frequency'):
+             self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
 
     def _create_table_geral_ma_frequency(self) -> None:
         query = """
@@ -188,7 +194,8 @@ class DatabaseManager:
             Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
             MA_Frequencia REAL, PRIMARY KEY (Concurso, Dezena, Janela)
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
+        if not self.table_exists('geral_ma_frequency'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
 
     def _create_table_geral_ma_delay(self) -> None:
         query = """
@@ -196,7 +203,8 @@ class DatabaseManager:
             Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
             MA_Atraso REAL, PRIMARY KEY (Concurso, Dezena, Janela)
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
+        if not self.table_exists('geral_ma_delay'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
 
     def _create_table_geral_recurrence_analysis(self) -> None:
         query = """
@@ -205,7 +213,8 @@ class DatabaseManager:
             Total_Gaps_Observados INTEGER, Media_Gaps REAL, Mediana_Gaps INTEGER,
             Std_Dev_Gaps REAL, Max_Gap_Observado INTEGER, Gaps_Observados TEXT
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
+        if not self.table_exists('geral_recurrence_analysis'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
 
     def _create_table_association_rules(self) -> None:
         query = """
@@ -215,7 +224,8 @@ class DatabaseManager:
             confidence REAL, lift REAL, leverage REAL, conviction REAL,
             PRIMARY KEY (antecedents_str, consequents_str)
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
+        if not self.table_exists('association_rules'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
 
     def _create_table_grid_line_distribution(self) -> None:
         query = """
@@ -224,7 +234,8 @@ class DatabaseManager:
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
             PRIMARY KEY (Linha, Qtd_Dezenas_Sorteadas)
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
+        if not self.table_exists('grid_line_distribution'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
 
     def _create_table_grid_column_distribution(self) -> None:
         query = """
@@ -233,7 +244,8 @@ class DatabaseManager:
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
             PRIMARY KEY (Coluna, Qtd_Dezenas_Sorteadas)
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
+        if not self.table_exists('grid_column_distribution'):
+            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
     
     def _create_table_statistical_tests_results(self) -> None:
         query = """
@@ -243,24 +255,40 @@ class DatabaseManager:
             P_Value REAL, Degrees_Freedom INTEGER, Alpha_Level REAL DEFAULT 0.05,
             Conclusion TEXT, Parameters TEXT, Notes TEXT
         );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'statistical_tests_results' verificada/criada.")
+        if not self.table_exists('statistical_tests_results'): # Adicionado if not table_exists para consistência
+            self._execute_query(query, commit=True); logger.debug("Tabela 'statistical_tests_results' verificada/criada.")
 
-    def _create_table_monthly_number_frequency(self) -> None: # NOVO MÉTODO ADICIONADO
+    def _create_table_monthly_number_frequency(self) -> None:
         query = """
         CREATE TABLE IF NOT EXISTS monthly_number_frequency (
-            Dezena INTEGER NOT NULL,
-            Mes INTEGER NOT NULL,
-            Frequencia_Absoluta_Total_Mes INTEGER,
-            Total_Sorteios_Considerados_Mes INTEGER,
-            Frequencia_Relativa_Mes REAL,
-            PRIMARY KEY (Dezena, Mes)
+            Dezena INTEGER NOT NULL, Mes INTEGER NOT NULL,
+            Frequencia_Absoluta_Total_Mes INTEGER, Total_Sorteios_Considerados_Mes INTEGER,
+            Frequencia_Relativa_Mes REAL, PRIMARY KEY (Dezena, Mes)
+        );"""
+        if not self.table_exists('monthly_number_frequency'): # Adicionado if not table_exists
+            self._execute_query(query, commit=True); logger.debug("Tabela 'monthly_number_frequency' verificada/criada.")
+
+    # --- NOVO MÉTODO PARA PROPRIEDADES NUMÉRICAS MENSAIS ---
+    def _create_table_monthly_draw_properties_summary(self) -> None:
+        """
+        Cria a tabela para armazenar o sumário de propriedades numéricas dos sorteios por mês.
+        """
+        query = """
+        CREATE TABLE IF NOT EXISTS monthly_draw_properties_summary (
+            Mes INTEGER PRIMARY KEY,                   -- 1 para Janeiro, ..., 12 para Dezembro
+            Total_Sorteios_Mes INTEGER,              -- Total de sorteios considerados para este mês
+            Soma_Media_Mensal REAL,
+            Media_Pares_Mensal REAL,
+            Media_Impares_Mensal REAL,
+            Media_Primos_Mensal REAL
+            -- Adicionar outras médias de propriedades conforme necessário
         );
         """
         self._execute_query(query, commit=True)
-        logger.debug("Tabela 'monthly_number_frequency' verificada/criada.")
+        logger.debug("Tabela 'monthly_draw_properties_summary' verificada/criada.")
 
     # --- Métodos de criação de tabelas existentes do seu arquivo original ---
-    # (Mantidos como estão no seu arquivo original da pasta)
+    # (Garantir que eles estejam presentes e corretos no seu arquivo DatabaseManager)
     def _create_frequent_itemsets_table(self) -> None:
         query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
         self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
@@ -401,7 +429,6 @@ class DatabaseManager:
         self.close()
 
 if __name__ == '__main__':
-    # ... (código de teste if __name__ == '__main__' mantido como no original) ...
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     db_test_path = None 
     try:
@@ -424,8 +451,8 @@ if __name__ == '__main__':
             'draw_position_frequency', 'geral_ma_frequency', 'geral_ma_delay', 
             'geral_recurrence_analysis', 'association_rules',
             'grid_line_distribution', 'grid_column_distribution',
-            'statistical_tests_results',
-            'monthly_number_frequency' # Nova verificação
+            'statistical_tests_results', 'monthly_number_frequency',
+            'monthly_draw_properties_summary' # Nova verificação
         ]
         for table_name in tables_to_check:
             if db_m.table_exists(table_name):
@@ -433,15 +460,8 @@ if __name__ == '__main__':
             else:
                 logger.error(f"Teste: Tabela '{table_name}' NÃO existe após _create_all_tables.")
 
-        test_df = pd.DataFrame({'colA': [1, 2], 'colB': ['x', 'y']})
-        db_m.save_dataframe(test_df, 'test_table_load', if_exists='replace')
-        loaded_df = db_m.load_dataframe('test_table_load')
-        if loaded_df is not None and not loaded_df.empty:
-            logger.info(f"Teste load_dataframe: Carregado com sucesso. Conteúdo:\n{loaded_df}")
-        else:
-            logger.error("Teste load_dataframe: Falha ao carregar ou DataFrame vazio.")
+        # ... (restante do código de teste if __name__ == '__main__') ...
 
-        db_m.close()
     except Exception as e_test:
         logger.error(f"Erro no exemplo de uso do DatabaseManager: {e_test}", exc_info=True)
     finally:

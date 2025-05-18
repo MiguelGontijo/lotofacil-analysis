@@ -38,7 +38,7 @@ NUMBERS_PER_DRAW: int = 15
 
 DRAWN_NUMBERS_COLUMN_NAME: str = os.getenv('DRAWN_NUMBERS_COLUMN_NAME', 'drawn_numbers')
 CONTEST_ID_COLUMN_NAME: str = os.getenv('CONTEST_ID_COLUMN_NAME', 'contest_id')
-DATE_COLUMN_NAME: str = os.getenv('DATE_COLUMN_NAME', 'date') # Assegure que esta seja a coluna correta após a limpeza
+DATE_COLUMN_NAME: str = os.getenv('DATE_COLUMN_NAME', 'date')
 
 CHUNK_TYPES_CONFIG: Dict[str, List[int]] = {
     "linear": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_LINEAR', '10,25,50,75,100,150,200').split(',')],
@@ -93,6 +93,10 @@ STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = "statistical_tests_results"
 GERAL_MA_FREQUENCY_TABLE_NAME: str = "geral_ma_frequency"
 GERAL_MA_DELAY_TABLE_NAME: str = "geral_ma_delay"
 
+# Análise Sazonal
+MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = "monthly_number_frequency"
+MONTHLY_DRAW_PROPERTIES_TABLE_NAME: str = "monthly_draw_properties_summary" # NOVA CONSTANTE
+
 # --- Configurações para Médias Móveis Gerais ---
 _geral_ma_freq_windows_str: str = os.getenv('GERAL_MA_FREQ_WINDOWS', '5,10,20,30')
 GERAL_MA_FREQUENCY_WINDOWS: List[int] = [int(w.strip()) for w in _geral_ma_freq_windows_str.split(',')]
@@ -129,10 +133,6 @@ POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = {
         "max_observed_count_for_chi2": 10
     }
 }
-
-# --- Configurações para Análise Sazonal (por Mês) ---
-MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = "monthly_number_frequency"
-# Adicionaremos MONTHLY_DRAW_PROPERTIES_TABLE_NAME depois, se necessário
 
 
 class Config:
@@ -186,7 +186,8 @@ class Config:
     GRID_LINE_DISTRIBUTION_TABLE_NAME: str = GRID_LINE_DISTRIBUTION_TABLE_NAME
     GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = GRID_COLUMN_DISTRIBUTION_TABLE_NAME
     STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = STATISTICAL_TESTS_RESULTS_TABLE_NAME
-    MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = MONTHLY_NUMBER_FREQUENCY_TABLE_NAME # NOVA CONSTANTE
+    MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = MONTHLY_NUMBER_FREQUENCY_TABLE_NAME
+    MONTHLY_DRAW_PROPERTIES_TABLE_NAME: str = MONTHLY_DRAW_PROPERTIES_TABLE_NAME # NOVA CONSTANTE
 
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
@@ -220,9 +221,7 @@ if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
         # ... (outros prints de teste) ...
-        print(f"STATISTICAL_TESTS_RESULTS_TABLE_NAME: {config_obj.STATISTICAL_TESTS_RESULTS_TABLE_NAME}")
-        print(f"SUM_NORMALITY_TEST_BINS: {config_obj.SUM_NORMALITY_TEST_BINS}")
-        print(f"POISSON_DISTRIBUTION_TEST_CONFIG: {config_obj.POISSON_DISTRIBUTION_TEST_CONFIG}")
-        print(f"MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: {config_obj.MONTHLY_NUMBER_FREQUENCY_TABLE_NAME}") # Novo print
+        print(f"MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: {config_obj.MONTHLY_NUMBER_FREQUENCY_TABLE_NAME}")
+        print(f"MONTHLY_DRAW_PROPERTIES_TABLE_NAME: {config_obj.MONTHLY_DRAW_PROPERTIES_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")
