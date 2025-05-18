@@ -38,7 +38,7 @@ NUMBERS_PER_DRAW: int = 15
 
 DRAWN_NUMBERS_COLUMN_NAME: str = os.getenv('DRAWN_NUMBERS_COLUMN_NAME', 'drawn_numbers')
 CONTEST_ID_COLUMN_NAME: str = os.getenv('CONTEST_ID_COLUMN_NAME', 'contest_id')
-DATE_COLUMN_NAME: str = os.getenv('DATE_COLUMN_NAME', 'date')
+DATE_COLUMN_NAME: str = os.getenv('DATE_COLUMN_NAME', 'date') # Assegure que esta seja a coluna correta após a limpeza
 
 CHUNK_TYPES_CONFIG: Dict[str, List[int]] = {
     "linear": [int(s.strip()) for s in os.getenv('CHUNK_TYPES_LINEAR', '10,25,50,75,100,150,200').split(',')],
@@ -114,9 +114,7 @@ LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = {
 }
 
 # --- Configurações para Testes Estatísticos ---
-# Número de bins para o teste Qui-Quadrado de normalidade da soma das dezenas
 SUM_NORMALITY_TEST_BINS: int = int(os.getenv('SUM_NORMALITY_TEST_BINS', '10'))
-
 POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = {
     "Count_Primos_Per_Draw": {
         "column_name": "primos", 
@@ -131,6 +129,11 @@ POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = {
         "max_observed_count_for_chi2": 10
     }
 }
+
+# --- Configurações para Análise Sazonal (por Mês) ---
+MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = "monthly_number_frequency"
+# Adicionaremos MONTHLY_DRAW_PROPERTIES_TABLE_NAME depois, se necessário
+
 
 class Config:
     BASE_DIR: str = BASE_DIR
@@ -151,7 +154,7 @@ class Config:
     NUMBERS_PER_DRAW: int = NUMBERS_PER_DRAW
     DRAWN_NUMBERS_COLUMN_NAME: str = DRAWN_NUMBERS_COLUMN_NAME
     CONTEST_ID_COLUMN_NAME: str = CONTEST_ID_COLUMN_NAME
-    DATE_COLUMN_NAME: str = DATE_COLUMN_NAME
+    DATE_COLUMN_NAME: str = DATE_COLUMN_NAME 
     CHUNK_TYPES_CONFIG: Dict[str, List[int]] = CHUNK_TYPES_CONFIG
     CHUNK_TYPES: Dict[str, List[int]] = CHUNK_TYPES_CONFIG
 
@@ -183,6 +186,7 @@ class Config:
     GRID_LINE_DISTRIBUTION_TABLE_NAME: str = GRID_LINE_DISTRIBUTION_TABLE_NAME
     GRID_COLUMN_DISTRIBUTION_TABLE_NAME: str = GRID_COLUMN_DISTRIBUTION_TABLE_NAME
     STATISTICAL_TESTS_RESULTS_TABLE_NAME: str = STATISTICAL_TESTS_RESULTS_TABLE_NAME
+    MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: str = MONTHLY_NUMBER_FREQUENCY_TABLE_NAME # NOVA CONSTANTE
 
     GERAL_MA_FREQUENCY_WINDOWS: List[int] = GERAL_MA_FREQUENCY_WINDOWS
     GERAL_MA_DELAY_WINDOWS: List[int] = GERAL_MA_DELAY_WINDOWS
@@ -193,9 +197,9 @@ class Config:
     LOTOFACIL_GRID_LINES: Dict[str, List[int]] = LOTOFACIL_GRID_LINES
     LOTOFACIL_GRID_COLUMNS: Dict[str, List[int]] = LOTOFACIL_GRID_COLUMNS
     
-    # Nova constante para Testes Estatísticos
     SUM_NORMALITY_TEST_BINS: int = SUM_NORMALITY_TEST_BINS
     POISSON_DISTRIBUTION_TEST_CONFIG: Dict[str, Dict[str, Any]] = POISSON_DISTRIBUTION_TEST_CONFIG
+    
 
     def __init__(self):
         os.makedirs(self.LOG_DIR, exist_ok=True)
@@ -215,8 +219,10 @@ except Exception as e:
 if __name__ == '__main__':
     if config_obj:
         print(f"BASE_DIR: {config_obj.BASE_DIR}")
-        # ... (outros prints de teste)
+        # ... (outros prints de teste) ...
         print(f"STATISTICAL_TESTS_RESULTS_TABLE_NAME: {config_obj.STATISTICAL_TESTS_RESULTS_TABLE_NAME}")
-        print(f"SUM_NORMALITY_TEST_BINS: {config_obj.SUM_NORMALITY_TEST_BINS}") # Novo print
+        print(f"SUM_NORMALITY_TEST_BINS: {config_obj.SUM_NORMALITY_TEST_BINS}")
+        print(f"POISSON_DISTRIBUTION_TEST_CONFIG: {config_obj.POISSON_DISTRIBUTION_TEST_CONFIG}")
+        print(f"MONTHLY_NUMBER_FREQUENCY_TABLE_NAME: {config_obj.MONTHLY_NUMBER_FREQUENCY_TABLE_NAME}") # Novo print
     else:
         print("Instância config_obj não pôde ser criada.")

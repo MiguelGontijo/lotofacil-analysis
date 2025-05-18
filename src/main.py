@@ -19,6 +19,8 @@ from src.pipeline_steps.execute_max_delay import run_max_delay_analysis_step
 from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
 from src.pipeline_steps.execute_recurrence_analysis import run_recurrence_analysis_step
 from src.pipeline_steps.execute_grid_analysis import run_grid_analysis_step
+# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE SAZONAL
+from src.pipeline_steps.execute_seasonality_analysis import run_seasonality_analysis_step
 from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_frequent_itemsets import run_frequent_itemsets_analysis_step
 from src.pipeline_steps.execute_association_rules import run_association_rules_step
@@ -28,7 +30,6 @@ from src.pipeline_steps.execute_cycle_stats import run_cycle_stats_step
 from src.pipeline_steps.execute_cycle_progression import run_cycle_progression_analysis_step
 from src.pipeline_steps.execute_detailed_cycle_metrics import run_detailed_cycle_metrics_step
 from src.pipeline_steps.execute_properties import run_number_properties_analysis
-# IMPORTAÇÃO DA NOVA ETAPA DE TESTES ESTATÍSTICOS
 from src.pipeline_steps.execute_statistical_tests import run_statistical_tests_step
 from src.pipeline_steps.execute_repetition_analysis import run_repetition_analysis_step
 from src.pipeline_steps.execute_temporal_trend_analysis import run_temporal_trend_analysis_step
@@ -107,14 +108,15 @@ def main():
 
         main_analysis_pipeline_config: List[Dict[str, Any]] = [
             # Análises Fundamentais (Dezenas Individuais)
-            {"name": "frequency_analysis", "func": run_frequency_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]}, # Pré-requisito para statistical_tests
+            {"name": "frequency_analysis", "func": run_frequency_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "delay_analysis", "func": run_delay_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "max_delay_analysis", "func": run_max_delay_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "positional_analysis", "func": run_positional_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "recurrence_analysis", "func": run_recurrence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             {"name": "grid_analysis", "func": run_grid_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            # NOVA ETAPA DE TESTES ESTATÍSTICOS ADICIONADA AQUI
             {"name": "statistical_tests", "func": run_statistical_tests_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            # NOVA ETAPA DE ANÁLISE SAZONAL ADICIONADA AQUI
+            {"name": "seasonality_analysis", "func": run_seasonality_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
 
             # Análises de Relações e Conjuntos
             {"name": "pair_analysis", "func": run_pair_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},

@@ -21,7 +21,6 @@ class DatabaseManager:
             raise
 
     def connect(self) -> None:
-        """Estabelece a conexão com o banco de dados SQLite."""
         try:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.execute("PRAGMA foreign_keys = ON;")
@@ -32,7 +31,6 @@ class DatabaseManager:
             raise
 
     def close(self) -> None:
-        """Fecha a conexão com o banco de dados."""
         if self.conn:
             try:
                 self.conn.close()
@@ -131,6 +129,7 @@ class DatabaseManager:
     def _create_all_tables(self) -> None:
         logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
         
+        # Chamadas para métodos de criação de tabelas existentes no seu arquivo original
         self._create_table_frequencia_absoluta()
         self._create_table_frequencia_relativa()
         self._create_table_atraso_atual()
@@ -141,19 +140,6 @@ class DatabaseManager:
         self._create_frequent_itemsets_table()
         self._create_table_frequent_itemset_metrics() 
         self._create_table_sequence_metrics()
-        
-        # Adições das etapas anteriores mantidas (assumindo que já foram adicionadas ao seu arquivo)
-        # Usando hasattr para chamar condicionalmente, caso os métodos não tenham sido adicionados
-        # ao arquivo do usuário por algum motivo (embora o esperado seja que estejam).
-        if hasattr(self, '_create_table_draw_position_frequency'): self._create_table_draw_position_frequency()
-        if hasattr(self, '_create_table_geral_ma_frequency'): self._create_table_geral_ma_frequency()
-        if hasattr(self, '_create_table_geral_ma_delay'): self._create_table_geral_ma_delay()
-        if hasattr(self, '_create_table_geral_recurrence_analysis'): self._create_table_geral_recurrence_analysis()
-        if hasattr(self, '_create_table_association_rules'): self._create_table_association_rules()
-        if hasattr(self, '_create_table_grid_line_distribution'): self._create_table_grid_line_distribution()
-        if hasattr(self, '_create_table_grid_column_distribution'): self._create_table_grid_column_distribution()
-        self._create_table_statistical_tests_results() # Nova chamada
-
         self._create_table_ciclos_detalhe()
         self._create_table_ciclos_sumario_estatisticas()
         self._create_table_ciclo_progression()
@@ -163,70 +149,26 @@ class DatabaseManager:
         self._create_table_ciclo_metric_atraso_final()
         self._create_table_ciclo_rank_frequency()
         self._create_table_ciclo_group_metrics()
-
         self._create_table_propriedades_numericas_por_concurso()
         self._create_table_analise_repeticao_concurso_anterior()
-        
         self._create_table_chunk_metrics() 
-
         self._create_table_rank_geral_dezenas_por_frequencia()
+        
+        # Chamadas para os métodos que adicionamos em etapas anteriores (devem estar completos)
+        self._create_table_draw_position_frequency() 
+        self._create_table_geral_ma_frequency()
+        self._create_table_geral_ma_delay()
+        self._create_table_geral_recurrence_analysis()
+        self._create_table_association_rules()
+        self._create_table_grid_line_distribution()
+        self._create_table_grid_column_distribution()
+        self._create_table_statistical_tests_results()
+        self._create_table_monthly_number_frequency() # Esta é a mais recente que estamos adicionando
         
         logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
 
-    # Métodos de criação de tabela existentes (mantidos como estão no seu arquivo original)
-    # ... (todos os seus _create_table_* existentes até antes dos novos) ...
-    # Para ser conciso, vou omitir a repetição dos métodos _create_table_* que já adicionamos
-    # nas etapas anteriores, assumindo que eles estão no seu arquivo.
-    # Apenas o novo método será explicitamente definido abaixo.
-
-    def _create_table_statistical_tests_results(self) -> None:
-        """
-        Cria a tabela para armazenar os resultados de testes estatísticos diversos.
-        """
-        query = """
-        CREATE TABLE IF NOT EXISTS statistical_tests_results (
-            Test_ID INTEGER PRIMARY KEY AUTOINCREMENT, -- Chave primária para cada resultado de teste
-            Test_Name TEXT NOT NULL,                   -- Ex: 'ChiSquare_NumberFrequencies_Uniformity'
-            Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            Chi2_Statistic REAL,
-            P_Value REAL,
-            Degrees_Freedom INTEGER,
-            Alpha_Level REAL DEFAULT 0.05,             -- Nível de significância usado
-            Conclusion TEXT,                           -- Ex: 'Rejeita H0: Distribuição não uniforme'
-            Parameters TEXT,                           -- JSON string com parâmetros específicos do teste
-            Notes TEXT                                 -- Observações adicionais
-        );
-        """
-        self._execute_query(query, commit=True)
-        logger.debug("Tabela 'statistical_tests_results' verificada/criada.")
-    
-    # É importante que todos os métodos _create_table_* referenciados em _create_all_tables
-    # estejam definidos na classe. Omiti os que já existem no seu arquivo para brevidade.
-    # Vou adicionar apenas os que são estritamente novos para esta etapa,
-    # ou garantir que os outros sejam chamados com hasattr como feito acima.
-    # Para os métodos adicionados nas últimas etapas (draw_position_frequency, etc.),
-    # se eles não estiverem no seu arquivo original, eles precisariam ser adicionados
-    # de forma similar a _create_table_statistical_tests_results.
-
-    # Assumindo que os métodos de criação para as tabelas das etapas anteriores
-    # (draw_position_frequency, geral_ma_frequency, geral_ma_delay, 
-    # geral_recurrence_analysis, association_rules, grid_line_distribution, grid_column_distribution)
-    # já foram adicionados ao seu arquivo src/database_manager.py nas etapas correspondentes.
-
-    # Lista de métodos de criação de tabelas existentes que devem estar no seu arquivo original
-    # (Eu não os redefinirei aqui para evitar redundância, mas eles são chamados em _create_all_tables)
-    def _create_frequent_itemsets_table(self) -> None: # Exemplo de método existente
-        query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
-    # ... (e todos os outros métodos _create_table_* do seu arquivo original) ...
-    # ... (incluindo os que adicionamos para draw_position_frequency, MAs, recurrence, association_rules, grid)
-
-    # Certifique-se de que todos os métodos chamados em _create_all_tables estão definidos na classe.
-    # Se algum método como _create_table_draw_position_frequency foi apenas sugerido
-    # mas não explicitamente adicionado ao seu arquivo nas etapas anteriores, ele precisaria
-    # ser adicionado agora de forma completa.
-    # Vou adicionar abaixo as definições dos métodos que criamos nas etapas anteriores,
-    # caso eles não tenham sido totalmente integrados ao seu arquivo.
+    # --- MÉTODOS DE CRIAÇÃO DE TABELA ADICIONADOS NAS ÚLTIMAS ETAPAS ---
+    # --- Garantir que estas definições estejam COMPLETAS e CORRETAS ---
 
     def _create_table_draw_position_frequency(self) -> None:
         query = """
@@ -238,8 +180,7 @@ class DatabaseManager:
             Posicao_12 INTEGER DEFAULT 0, Posicao_13 INTEGER DEFAULT 0, Posicao_14 INTEGER DEFAULT 0,
             Posicao_15 INTEGER DEFAULT 0
         );"""
-        if not self.table_exists('draw_position_frequency'):
-             self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
 
     def _create_table_geral_ma_frequency(self) -> None:
         query = """
@@ -247,8 +188,7 @@ class DatabaseManager:
             Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
             MA_Frequencia REAL, PRIMARY KEY (Concurso, Dezena, Janela)
         );"""
-        if not self.table_exists('geral_ma_frequency'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
 
     def _create_table_geral_ma_delay(self) -> None:
         query = """
@@ -256,8 +196,7 @@ class DatabaseManager:
             Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
             MA_Atraso REAL, PRIMARY KEY (Concurso, Dezena, Janela)
         );"""
-        if not self.table_exists('geral_ma_delay'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
 
     def _create_table_geral_recurrence_analysis(self) -> None:
         query = """
@@ -266,8 +205,7 @@ class DatabaseManager:
             Total_Gaps_Observados INTEGER, Media_Gaps REAL, Mediana_Gaps INTEGER,
             Std_Dev_Gaps REAL, Max_Gap_Observado INTEGER, Gaps_Observados TEXT
         );"""
-        if not self.table_exists('geral_recurrence_analysis'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
 
     def _create_table_association_rules(self) -> None:
         query = """
@@ -277,8 +215,7 @@ class DatabaseManager:
             confidence REAL, lift REAL, leverage REAL, conviction REAL,
             PRIMARY KEY (antecedents_str, consequents_str)
         );"""
-        if not self.table_exists('association_rules'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
 
     def _create_table_grid_line_distribution(self) -> None:
         query = """
@@ -287,8 +224,7 @@ class DatabaseManager:
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
             PRIMARY KEY (Linha, Qtd_Dezenas_Sorteadas)
         );"""
-        if not self.table_exists('grid_line_distribution'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
 
     def _create_table_grid_column_distribution(self) -> None:
         query = """
@@ -297,10 +233,38 @@ class DatabaseManager:
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
             PRIMARY KEY (Coluna, Qtd_Dezenas_Sorteadas)
         );"""
-        if not self.table_exists('grid_column_distribution'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
+        self._execute_query(query, commit=True); logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
     
-    # ... (e todos os outros métodos _create_table_* do seu arquivo original da pasta)
+    def _create_table_statistical_tests_results(self) -> None:
+        query = """
+        CREATE TABLE IF NOT EXISTS statistical_tests_results (
+            Test_ID INTEGER PRIMARY KEY AUTOINCREMENT, Test_Name TEXT NOT NULL,
+            Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, Chi2_Statistic REAL,
+            P_Value REAL, Degrees_Freedom INTEGER, Alpha_Level REAL DEFAULT 0.05,
+            Conclusion TEXT, Parameters TEXT, Notes TEXT
+        );"""
+        self._execute_query(query, commit=True); logger.debug("Tabela 'statistical_tests_results' verificada/criada.")
+
+    def _create_table_monthly_number_frequency(self) -> None: # NOVO MÉTODO ADICIONADO
+        query = """
+        CREATE TABLE IF NOT EXISTS monthly_number_frequency (
+            Dezena INTEGER NOT NULL,
+            Mes INTEGER NOT NULL,
+            Frequencia_Absoluta_Total_Mes INTEGER,
+            Total_Sorteios_Considerados_Mes INTEGER,
+            Frequencia_Relativa_Mes REAL,
+            PRIMARY KEY (Dezena, Mes)
+        );
+        """
+        self._execute_query(query, commit=True)
+        logger.debug("Tabela 'monthly_number_frequency' verificada/criada.")
+
+    # --- Métodos de criação de tabelas existentes do seu arquivo original ---
+    # (Mantidos como estão no seu arquivo original da pasta)
+    def _create_frequent_itemsets_table(self) -> None:
+        query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
+        self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
+
     def _create_table_frequent_itemset_metrics(self) -> None:
         query = """
         CREATE TABLE IF NOT EXISTS frequent_itemset_metrics (
@@ -437,6 +401,7 @@ class DatabaseManager:
         self.close()
 
 if __name__ == '__main__':
+    # ... (código de teste if __name__ == '__main__' mantido como no original) ...
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     db_test_path = None 
     try:
@@ -459,7 +424,8 @@ if __name__ == '__main__':
             'draw_position_frequency', 'geral_ma_frequency', 'geral_ma_delay', 
             'geral_recurrence_analysis', 'association_rules',
             'grid_line_distribution', 'grid_column_distribution',
-            'statistical_tests_results' # Nova verificação
+            'statistical_tests_results',
+            'monthly_number_frequency' # Nova verificação
         ]
         for table_name in tables_to_check:
             if db_m.table_exists(table_name):
