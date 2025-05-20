@@ -2,9 +2,11 @@
 import sqlite3
 import pandas as pd
 import logging
-from typing import List, Dict, Any, Tuple, Optional
-import os 
-import json 
+import os
+from typing import List, Any, Tuple, Optional
+
+# Importar Config para type hinting, mas a instância é geralmente passada ou importada como config_obj
+# from .config import Config 
 
 logger = logging.getLogger(__name__)
 
@@ -14,17 +16,22 @@ class DatabaseManager:
         self.conn: Optional[sqlite3.Connection] = None
         self.cursor: Optional[sqlite3.Cursor] = None
         try:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir): # Cria o diretório se não existir
+                os.makedirs(db_dir)
+                logger.info(f"Diretório do banco de dados criado: {db_dir}")
             self.connect()
             logger.info(f"Database Manager inicializado e conectado a: {db_path}")
         except sqlite3.Error as e:
-            logger.error(f"Erro ao inicializar o DatabaseManager para {db_path}: {e}", exc_info=True)
+            logger.error(f"Erro ao inicializar DatabaseManager para {db_path}: {e}", exc_info=True)
             raise
 
     def connect(self) -> None:
         """Estabelece a conexão com o banco de dados SQLite."""
         try:
-            self.conn = sqlite3.connect(self.db_path)
+            self.conn = sqlite3.connect(self.db_path, timeout=10) # Timeout para evitar locks longos
             self.conn.execute("PRAGMA foreign_keys = ON;")
+            self.conn.execute("PRAGMA journal_mode = WAL;") # Melhor para concorrência
             self.cursor = self.conn.cursor()
             logger.debug(f"Conexão com o banco de dados {self.db_path} estabelecida.")
         except sqlite3.Error as e:
@@ -33,441 +40,453 @@ class DatabaseManager:
 
     def close(self) -> None:
         """Fecha a conexão com o banco de dados."""
+        if self.cursor:
+            try: self.cursor.close()
+            except sqlite3.Error as e: logger.error(f"Erro ao fechar cursor: {e}", exc_info=True)
+            self.cursor = None
         if self.conn:
-            try:
-                self.conn.close()
-                logger.debug(f"Conexão com o banco de dados {self.db_path} fechada.")
-            except sqlite3.Error as e:
-                logger.error(f"Erro ao fechar a conexão com o banco de dados: {e}", exc_info=True)
+            try: self.conn.close()
+            except sqlite3.Error as e: logger.error(f"Erro ao fechar conexão: {e}", exc_info=True)
+            logger.debug(f"Conexão com o banco de dados {self.db_path} fechada.")
         self.conn = None
-        self.cursor = None
 
-    def _execute_query(self, query: str, params: Tuple = None, commit: bool = False) -> None:
+    def _ensure_connection(self):
+        """Garante que uma conexão e cursor estejam ativos, tentando reconectar se necessário."""
         if not self.conn or not self.cursor:
-            logger.error("Tentativa de executar query sem uma conexão ativa.")
-            raise sqlite3.Error("Conexão com o banco de dados não está ativa.")
+            logger.warning("Conexão/cursor não ativos. Tentando reconectar...")
+            self.connect() # connect() levanta exceção em caso de falha
+            if not self.conn or not self.cursor: # Checagem dupla
+                 logger.error("Falha crítica ao restabelecer conexão/cursor.")
+                 raise sqlite3.Error("Falha ao restabelecer conexão com o banco de dados.")
+
+    def _execute_ddl_query(self, query: str, params: Tuple = None) -> None:
+        """Método interno para executar queries DDL (CREATE, ALTER, DROP)."""
+        self._ensure_connection()
         try:
-            logger.debug(f"Executando query: {query} com params: {params}")
+            logger.debug(f"Executando DDL: {query[:150]}...") # Log truncado
             self.cursor.execute(query, params or ())
-            if commit:
-                self.conn.commit()
-                logger.debug("Query comitada.")
+            self.conn.commit()
+            logger.debug("DDL comitada.")
         except sqlite3.Error as e:
-            logger.error(f"Erro ao executar query: {query} - {e}", exc_info=True)
+            logger.error(f"Erro DDL: {query[:150]}... - {e}", exc_info=True)
+            if self.conn: 
+                try: self.conn.rollback()
+                except Exception as rb_ex: logger.error(f"Erro no rollback após falha de DDL: {rb_ex}")
             raise
+
+    def execute_query(self, query: str, params: Tuple = None) -> pd.DataFrame:
+        """Executa uma query SELECT e retorna os resultados como um DataFrame Pandas."""
+        self._ensure_connection()
+        try:
+            logger.debug(f"Executando SELECT: {query} com params: {params}")
+            df = pd.read_sql_query(query, self.conn, params=params or ())
+            logger.debug(f"SELECT executada. {len(df) if df is not None else 'Nenhuma'} linha(s).")
+            return df if df is not None else pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Erro SELECT: {query} - {e}", exc_info=True)
+            return pd.DataFrame()
 
     def save_dataframe(self, df: pd.DataFrame, table_name: str, if_exists: str = 'replace') -> None:
-        if not self.conn:
-            logger.error("Tentativa de salvar DataFrame sem uma conexão ativa.")
-            raise sqlite3.Error("Conexão com o banco de dados não está ativa.")
-        if df is None or df.empty:
-            logger.warning(f"DataFrame para a tabela '{table_name}' está vazio ou é None. Nada será salvo.")
+        """Salva um DataFrame Pandas em uma tabela SQLite."""
+        self._ensure_connection()
+        if df is None:
+            logger.warning(f"DataFrame para '{table_name}' é None. Nada salvo.")
             return
         try:
-            logger.info(f"Salvando DataFrame na tabela '{table_name}' (if_exists='{if_exists}'). Linhas: {len(df)}")
-            df.to_sql(table_name, self.conn, if_exists=if_exists, index=False)
-            logger.info(f"DataFrame salvo com sucesso na tabela '{table_name}'.")
-        except Exception as e: 
-            logger.error(f"Erro ao salvar DataFrame na tabela '{table_name}': {e}", exc_info=True)
+            logger.info(f"Salvando DataFrame em '{table_name}' (if_exists='{if_exists}', Linhas: {len(df)})")
+            df.to_sql(table_name, self.conn, if_exists=if_exists, index=False, chunksize=1000)
+            logger.info(f"DataFrame salvo em '{table_name}'.")
+        except Exception as e:
+            logger.error(f"Erro ao salvar DataFrame em '{table_name}': {e}", exc_info=True)
             raise
 
-    def load_dataframe(self, table_name: str) -> Optional[pd.DataFrame]:
-        if not self.table_exists(table_name):
-            logger.warning(f"Tabela '{table_name}' não existe. Retornando DataFrame vazio.")
-            return pd.DataFrame() 
-        if not self.conn:
-            logger.error(f"Tentativa de carregar tabela '{table_name}' sem conexão.")
-            return pd.DataFrame() 
-        try:
-            logger.info(f"Carregando DataFrame da tabela '{table_name}'.")
-            df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
-            logger.info(f"DataFrame da tabela '{table_name}' carregado com {len(df)} linhas.")
-            return df
-        except Exception as e: 
-            logger.error(f"Erro ao carregar DataFrame da tabela '{table_name}': {e}", exc_info=True)
-            return pd.DataFrame() 
-
-    def load_dataframe_from_db(self, table_name: str) -> Optional[pd.DataFrame]:
-        logger.debug(f"Chamando load_dataframe_from_db, redirecionando para load_dataframe para tabela: {table_name}")
-        return self.load_dataframe(table_name)
+    def load_dataframe(self, table_name: str, query: Optional[str] = None, params: Optional[Tuple] = None) -> pd.DataFrame:
+        """Carrega dados de uma tabela (ou query customizada) para um DataFrame Pandas."""
+        final_query = query
+        if not final_query:
+            if not self.table_exists(table_name):
+                logger.warning(f"Tabela '{table_name}' não existe. Retornando DataFrame vazio.")
+                return pd.DataFrame()
+            final_query = f"SELECT * FROM {table_name}"
+        
+        df = self.execute_query(final_query, params=params)
+        if df is None: return pd.DataFrame() # execute_query retorna DataFrame vazio em erro
+            
+        log_source = f"tabela '{table_name}'" if not query else "query customizada"
+        logger.info(f"DataFrame de {log_source} carregado com {len(df)} linhas.")
+        return df
 
     def table_exists(self, table_name: str) -> bool:
-        if not self.cursor: 
-            logger.debug("Cursor não está ativo em table_exists. Tentando reconectar.")
-            try:
-                self.connect()
-            except sqlite3.Error as e_connect:
-                logger.error(f"Falha ao reconectar em table_exists para '{table_name}': {e_connect}")
-                return False 
-            if not self.cursor: 
-                 logger.error(f"Cursor ainda não está ativo após tentativa de reconexão em table_exists para '{table_name}'.")
-                 return False
+        """Verifica se uma tabela existe no banco de dados."""
+        self._ensure_connection()
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
-            return self.cursor.fetchone() is not None
+            exists = self.cursor.fetchone() is not None
+            logger.debug(f"Tabela '{table_name}' {'existe.' if exists else 'não existe.'}")
+            return exists
         except sqlite3.Error as e:
-            logger.error(f"Erro ao verificar a existência da tabela '{table_name}': {e}", exc_info=True)
+            logger.error(f"Erro ao verificar se tabela '{table_name}' existe: {e}", exc_info=True)
             return False
-        
-    def get_table_names(self) -> List[str]:
-        if not self.conn or not self.cursor: 
-            logger.debug("Tentativa de obter nomes de tabelas sem conexão/cursor. Tentando reconectar.")
-            try:
-                self.connect()
-            except sqlite3.Error as e_connect:
-                logger.error(f"Falha ao reconectar para obter nomes de tabelas: {e_connect}")
-                return []
-            if not self.cursor:
-                 logger.error("Cursor ainda não está ativo após tentativa de reconexão para obter nomes de tabelas.")
-                 return []
-        try:
-            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
-            tables = self.cursor.fetchall()
-            return [table[0] for table in tables]
-        except sqlite3.Error as e:
-            logger.error(f"Erro ao buscar nomes de tabelas: {e}", exc_info=True)
-            return []
-    
-    def _create_all_tables(self) -> None:
-        logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
-        
-        self._create_table_frequencia_absoluta()
-        self._create_table_frequencia_relativa()
-        self._create_table_atraso_atual()
-        self._create_table_atraso_maximo()
-        self._create_table_atraso_maximo_separado() 
-        self._create_table_atraso_medio()
-        self._create_table_pair_metrics() 
-        self._create_frequent_itemsets_table()
-        self._create_table_frequent_itemset_metrics() 
-        self._create_table_sequence_metrics()
-        
-        # Garantindo que os métodos de criação de tabelas das etapas anteriores sejam chamados
-        if hasattr(self, '_create_table_draw_position_frequency'): self._create_table_draw_position_frequency()
-        if hasattr(self, '_create_table_geral_ma_frequency'): self._create_table_geral_ma_frequency()
-        if hasattr(self, '_create_table_geral_ma_delay'): self._create_table_geral_ma_delay()
-        if hasattr(self, '_create_table_geral_recurrence_analysis'): self._create_table_geral_recurrence_analysis()
-        if hasattr(self, '_create_table_association_rules'): self._create_table_association_rules()
-        if hasattr(self, '_create_table_grid_line_distribution'): self._create_table_grid_line_distribution()
-        if hasattr(self, '_create_table_grid_column_distribution'): self._create_table_grid_column_distribution()
-        if hasattr(self, '_create_table_statistical_tests_results'): self._create_table_statistical_tests_results()
-        if hasattr(self, '_create_table_monthly_number_frequency'): self._create_table_monthly_number_frequency()
-        self._create_table_monthly_draw_properties_summary() # Nova chamada
 
-        self._create_table_ciclos_detalhe()
-        self._create_table_ciclos_sumario_estatisticas()
-        self._create_table_ciclo_progression()
-        self._create_table_ciclo_metric_frequency()
-        self._create_table_ciclo_metric_atraso_medio()
-        self._create_table_ciclo_metric_atraso_maximo()
-        self._create_table_ciclo_metric_atraso_final()
-        self._create_table_ciclo_rank_frequency()
-        self._create_table_ciclo_group_metrics()
+    def get_table_name_from_config(self, attr_name: str, default_name: str) -> str:
+        """Auxiliar para obter nome de tabela do config_obj ou usar default."""
+        from .config import config_obj # Importa config_obj aqui para acesso
+        return getattr(config_obj, attr_name, default_name)
 
-        self._create_table_propriedades_numericas_por_concurso()
-        self._create_table_analise_repeticao_concurso_anterior()
-        
-        self._create_table_chunk_metrics() 
+    # --- Métodos de Criação de Tabelas ---
+    # (Usando constantes do config_obj onde disponível)
 
-        self._create_table_rank_geral_dezenas_por_frequencia()
-        
-        logger.info("Verificação e criação de tabelas (essenciais listadas) concluída.")
+    def _create_table_draws(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('MAIN_DRAWS_TABLE_NAME', 'draws')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER PRIMARY KEY, {config_obj.DATE_COLUMN_NAME} TEXT,
+            {", ".join([f'{col} INTEGER' for col in config_obj.BALL_NUMBER_COLUMNS])},
+            {config_obj.DRAWN_NUMBERS_COLUMN_NAME} TEXT);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
-    # --- Métodos de Criação de Tabelas Adicionados em Etapas Anteriores ---
-    # (Estes métodos devem estar completos e corretos no seu arquivo)
+    def _create_table_draw_results_flat(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('FLAT_DRAWS_TABLE_NAME', 'draw_results_flat')
+        main_draws_table = self.get_table_name_from_config('MAIN_DRAWS_TABLE_NAME', 'draws')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}),
+            FOREIGN KEY ({config_obj.CONTEST_ID_COLUMN_NAME}) REFERENCES {main_draws_table}({config_obj.CONTEST_ID_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+            
+    def _create_table_analysis_delays(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_DELAYS_TABLE_NAME', 'analysis_delays')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            {config_obj.CURRENT_DELAY_COLUMN_NAME} INTEGER, {config_obj.MAX_DELAY_OBSERVED_COLUMN_NAME} INTEGER, {config_obj.AVG_DELAY_COLUMN_NAME} REAL,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_frequency_overall(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_FREQUENCY_OVERALL_TABLE_NAME', 'analysis_frequency_overall')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            {config_obj.FREQUENCY_COLUMN_NAME} INTEGER, {config_obj.RELATIVE_FREQUENCY_COLUMN_NAME} REAL,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_recurrence_cdf(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_RECURRENCE_CDF_TABLE_NAME', 'analysis_recurrence_cdf')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            {config_obj.RECURRENCE_CDF_COLUMN_NAME} REAL,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_rank_trend_metrics(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_RANK_TREND_METRICS_TABLE_NAME', 'analysis_rank_trend_metrics')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            {config_obj.RANK_SLOPE_COLUMN_NAME} REAL, {config_obj.TREND_STATUS_COLUMN_NAME} TEXT,
+            {config_obj.CHUNK_TYPE_COLUMN_NAME} TEXT, {config_obj.CHUNK_SIZE_COLUMN_NAME} INTEGER,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}, {config_obj.CHUNK_TYPE_COLUMN_NAME}, {config_obj.CHUNK_SIZE_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_cycle_status_dezenas(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_CYCLE_STATUS_DEZENAS_TABLE_NAME', 'analysis_cycle_status_dezenas')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL,
+            {config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.IS_MISSING_IN_CURRENT_CYCLE_COLUMN_NAME} INTEGER,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_cycle_closing_propensity(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_CYCLE_CLOSING_PROPENSITY_TABLE_NAME', 'analysis_cycle_closing_propensity')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.DEZENA_COLUMN_NAME} INTEGER PRIMARY KEY, {config_obj.CYCLE_CLOSING_SCORE_COLUMN_NAME} REAL);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_frequent_itemsets(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('FREQUENT_ITEMSETS_TABLE_NAME', 'frequent_itemsets')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.ITEMSET_STR_COLUMN_NAME} TEXT NOT NULL,
+            {config_obj.SUPPORT_COLUMN_NAME} REAL NOT NULL, {config_obj.K_COLUMN_NAME} INTEGER NOT NULL,
+            frequency_count INTEGER, PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.ITEMSET_STR_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_itemset_metrics(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_ITEMSET_METRICS_TABLE_NAME', 'analysis_itemset_metrics')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.ITEMSET_STR_COLUMN_NAME} TEXT NOT NULL,
+            {config_obj.K_COLUMN_NAME} INTEGER, {config_obj.SUPPORT_COLUMN_NAME} REAL,
+            {config_obj.CONFIDENCE_COLUMN_NAME} REAL, {config_obj.LIFT_COLUMN_NAME} REAL,
+            {config_obj.ITEMSET_CURRENT_DELAY_COLUMN_NAME} INTEGER, {config_obj.ITEMSET_AVG_DELAY_COLUMN_NAME} REAL,
+            {config_obj.ITEMSET_MAX_DELAY_COLUMN_NAME} INTEGER, {config_obj.ITEMSET_SCORE_COLUMN_NAME} REAL,
+            last_occurrence_contest_id INTEGER, occurrences_draw_ids TEXT,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.ITEMSET_STR_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_cycles_detail(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_CYCLES_DETAIL_TABLE_NAME', 'analysis_cycles_detail')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, concurso_inicio INTEGER, concurso_fim INTEGER, 
+            duracao_concursos INTEGER, numeros_faltantes TEXT, qtd_faltantes INTEGER,
+            PRIMARY KEY({config_obj.CICLO_NUM_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_cycles_summary(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_CYCLES_SUMMARY_TABLE_NAME', 'analysis_cycles_summary')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            summary_id INTEGER PRIMARY KEY DEFAULT 1, total_ciclos_fechados INTEGER, duracao_media_ciclo REAL, 
+            duracao_min_ciclo INTEGER, duracao_max_ciclo INTEGER, duracao_mediana_ciclo REAL);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analysis_cycle_progression_raw(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ANALYSIS_CYCLE_PROGRESSION_RAW_TABLE_NAME', 'analysis_cycle_progression_raw')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER, {config_obj.DATE_COLUMN_NAME} TEXT, ciclo_num_associado INTEGER, 
+            dezenas_sorteadas_neste_concurso TEXT, numeros_que_faltavam_antes_deste_concurso TEXT, 
+            qtd_faltavam_antes_deste_concurso INTEGER, dezenas_apuradas_neste_concurso TEXT, 
+            qtd_apuradas_neste_concurso INTEGER, numeros_faltantes_apos_este_concurso TEXT, 
+            qtd_faltantes_apos_este_concurso INTEGER, ciclo_fechou_neste_concurso INTEGER,
+            PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, ciclo_num_associado));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_propriedades_numericas_por_concurso(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('PROPRIEDADES_NUMERICAS_POR_CONCURSO_TABLE_NAME', 'propriedades_numericas_por_concurso')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER PRIMARY KEY, 
+            soma_dezenas INTEGER, pares INTEGER, impares INTEGER, primos INTEGER);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_analise_repeticao_concurso_anterior(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('REPETICAO_CONCURSO_ANTERIOR_TABLE_NAME', 'analise_repeticao_concurso_anterior')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER PRIMARY KEY, 
+            {config_obj.DATE_COLUMN_NAME} TEXT, QtdDezenasRepetidas INTEGER, DezenasRepetidas TEXT);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_chunk_metrics(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CHUNK_METRICS_TABLE_NAME', 'chunk_metrics')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CHUNK_TYPE_COLUMN_NAME} TEXT, {config_obj.CHUNK_SIZE_COLUMN_NAME} INTEGER,
+            chunk_start_draw_id INTEGER, chunk_end_draw_id INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER,
+            frequency_in_chunk_abs INTEGER, frequency_in_chunk_rel REAL,
+            current_delay_in_chunk INTEGER, max_delay_in_chunk INTEGER, avg_delay_in_chunk REAL,
+            delay_std_dev REAL, occurrence_std_dev REAL,
+            PRIMARY KEY ({config_obj.CHUNK_TYPE_COLUMN_NAME}, {config_obj.CHUNK_SIZE_COLUMN_NAME}, chunk_start_draw_id, {config_obj.DEZENA_COLUMN_NAME}));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
     def _create_table_draw_position_frequency(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS draw_position_frequency (
-            Dezena INTEGER PRIMARY KEY, Posicao_1 INTEGER DEFAULT 0, Posicao_2 INTEGER DEFAULT 0,
-            Posicao_3 INTEGER DEFAULT 0, Posicao_4 INTEGER DEFAULT 0, Posicao_5 INTEGER DEFAULT 0,
-            Posicao_6 INTEGER DEFAULT 0, Posicao_7 INTEGER DEFAULT 0, Posicao_8 INTEGER DEFAULT 0,
-            Posicao_9 INTEGER DEFAULT 0, Posicao_10 INTEGER DEFAULT 0, Posicao_11 INTEGER DEFAULT 0,
-            Posicao_12 INTEGER DEFAULT 0, Posicao_13 INTEGER DEFAULT 0, Posicao_14 INTEGER DEFAULT 0,
-            Posicao_15 INTEGER DEFAULT 0
-        );"""
-        if not self.table_exists('draw_position_frequency'):
-             self._execute_query(query, commit=True); logger.debug("Tabela 'draw_position_frequency' verificada/criada.")
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('DRAW_POSITION_FREQUENCY_TABLE_NAME', 'draw_position_frequency')
+        cols_posicao = ", ".join([f"Posicao_{i} INTEGER DEFAULT 0" for i in range(1, 16)])
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.DEZENA_COLUMN_NAME} INTEGER PRIMARY KEY, {cols_posicao});"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_geral_ma_frequency(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS geral_ma_frequency (
-            Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
-            MA_Frequencia REAL, PRIMARY KEY (Concurso, Dezena, Janela)
-        );"""
-        if not self.table_exists('geral_ma_frequency'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_frequency' verificada/criada.")
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('GERAL_MA_FREQUENCY_TABLE_NAME', 'geral_ma_frequency')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL, Janela INTEGER NOT NULL,
+            MA_Frequencia REAL, PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}, Janela));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_geral_ma_delay(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS geral_ma_delay (
-            Concurso INTEGER NOT NULL, Dezena INTEGER NOT NULL, Janela INTEGER NOT NULL,
-            MA_Atraso REAL, PRIMARY KEY (Concurso, Dezena, Janela)
-        );"""
-        if not self.table_exists('geral_ma_delay'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_ma_delay' verificada/criada.")
-
-    def _create_table_geral_recurrence_analysis(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS geral_recurrence_analysis (
-            Dezena INTEGER PRIMARY KEY, Atraso_Atual INTEGER, CDF_Atraso_Atual REAL,
-            Total_Gaps_Observados INTEGER, Media_Gaps REAL, Mediana_Gaps INTEGER,
-            Std_Dev_Gaps REAL, Max_Gap_Observado INTEGER, Gaps_Observados TEXT
-        );"""
-        if not self.table_exists('geral_recurrence_analysis'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'geral_recurrence_analysis' verificada/criada.")
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('GERAL_MA_DELAY_TABLE_NAME', 'geral_ma_delay')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.CONTEST_ID_COLUMN_NAME} INTEGER NOT NULL, {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL, Janela INTEGER NOT NULL,
+            MA_Atraso REAL, PRIMARY KEY ({config_obj.CONTEST_ID_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}, Janela));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_association_rules(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS association_rules (
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('ASSOCIATION_RULES_TABLE_NAME', 'association_rules')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
             antecedents_str TEXT NOT NULL, consequents_str TEXT NOT NULL,
             antecedent_support REAL, consequent_support REAL, support REAL,
             confidence REAL, lift REAL, leverage REAL, conviction REAL,
-            PRIMARY KEY (antecedents_str, consequents_str)
-        );"""
-        if not self.table_exists('association_rules'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'association_rules' verificada/criada.")
+            PRIMARY KEY (antecedents_str, consequents_str));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_grid_line_distribution(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS grid_line_distribution (
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('GRID_LINE_DISTRIBUTION_TABLE_NAME', 'grid_line_distribution')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
             Linha TEXT NOT NULL, Qtd_Dezenas_Sorteadas INTEGER NOT NULL,
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
-            PRIMARY KEY (Linha, Qtd_Dezenas_Sorteadas)
-        );"""
-        if not self.table_exists('grid_line_distribution'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_line_distribution' verificada/criada.")
+            PRIMARY KEY (Linha, Qtd_Dezenas_Sorteadas));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_grid_column_distribution(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS grid_column_distribution (
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('GRID_COLUMN_DISTRIBUTION_TABLE_NAME', 'grid_column_distribution')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
             Coluna TEXT NOT NULL, Qtd_Dezenas_Sorteadas INTEGER NOT NULL,
             Frequencia_Absoluta INTEGER NOT NULL, Frequencia_Relativa REAL NOT NULL,
-            PRIMARY KEY (Coluna, Qtd_Dezenas_Sorteadas)
-        );"""
-        if not self.table_exists('grid_column_distribution'):
-            self._execute_query(query, commit=True); logger.debug("Tabela 'grid_column_distribution' verificada/criada.")
+            PRIMARY KEY (Coluna, Qtd_Dezenas_Sorteadas));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
     
     def _create_table_statistical_tests_results(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS statistical_tests_results (
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('STATISTICAL_TESTS_RESULTS_TABLE_NAME', 'statistical_tests_results')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
             Test_ID INTEGER PRIMARY KEY AUTOINCREMENT, Test_Name TEXT NOT NULL,
             Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, Chi2_Statistic REAL,
             P_Value REAL, Degrees_Freedom INTEGER, Alpha_Level REAL DEFAULT 0.05,
-            Conclusion TEXT, Parameters TEXT, Notes TEXT
-        );"""
-        if not self.table_exists('statistical_tests_results'): # Adicionado if not table_exists para consistência
-            self._execute_query(query, commit=True); logger.debug("Tabela 'statistical_tests_results' verificada/criada.")
+            Conclusion TEXT, Parameters TEXT, Notes TEXT);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
     def _create_table_monthly_number_frequency(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS monthly_number_frequency (
-            Dezena INTEGER NOT NULL, Mes INTEGER NOT NULL,
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('MONTHLY_NUMBER_FREQUENCY_TABLE_NAME', 'monthly_number_frequency')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            {config_obj.DEZENA_COLUMN_NAME} INTEGER NOT NULL, Mes INTEGER NOT NULL,
             Frequencia_Absoluta_Total_Mes INTEGER, Total_Sorteios_Considerados_Mes INTEGER,
-            Frequencia_Relativa_Mes REAL, PRIMARY KEY (Dezena, Mes)
-        );"""
-        if not self.table_exists('monthly_number_frequency'): # Adicionado if not table_exists
-            self._execute_query(query, commit=True); logger.debug("Tabela 'monthly_number_frequency' verificada/criada.")
+            Frequencia_Relativa_Mes REAL, PRIMARY KEY ({config_obj.DEZENA_COLUMN_NAME}, Mes));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
-    # --- NOVO MÉTODO PARA PROPRIEDADES NUMÉRICAS MENSAIS ---
     def _create_table_monthly_draw_properties_summary(self) -> None:
-        """
-        Cria a tabela para armazenar o sumário de propriedades numéricas dos sorteios por mês.
-        """
-        query = """
-        CREATE TABLE IF NOT EXISTS monthly_draw_properties_summary (
-            Mes INTEGER PRIMARY KEY,                   -- 1 para Janeiro, ..., 12 para Dezembro
-            Total_Sorteios_Mes INTEGER,              -- Total de sorteios considerados para este mês
-            Soma_Media_Mensal REAL,
-            Media_Pares_Mensal REAL,
-            Media_Impares_Mensal REAL,
-            Media_Primos_Mensal REAL
-            -- Adicionar outras médias de propriedades conforme necessário
-        );
-        """
-        self._execute_query(query, commit=True)
-        logger.debug("Tabela 'monthly_draw_properties_summary' verificada/criada.")
-
-    # --- Métodos de criação de tabelas existentes do seu arquivo original ---
-    # (Garantir que eles estejam presentes e corretos no seu arquivo DatabaseManager)
-    def _create_frequent_itemsets_table(self) -> None:
-        query = "CREATE TABLE IF NOT EXISTS frequent_itemsets (itemset_str TEXT PRIMARY KEY, support REAL NOT NULL, length INTEGER NOT NULL, frequency_count INTEGER NOT NULL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemsets' OK.")
-
-    def _create_table_frequent_itemset_metrics(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS frequent_itemset_metrics (
-            itemset_str TEXT PRIMARY KEY, length INTEGER, support REAL, frequency_count INTEGER,
-            last_occurrence_contest_id INTEGER, current_delay INTEGER, mean_delay REAL,
-            max_delay INTEGER, std_dev_delay REAL, occurrences_draw_ids TEXT, 
-            FOREIGN KEY(itemset_str) REFERENCES frequent_itemsets(itemset_str)
-        );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'frequent_itemset_metrics' verificada/criada.")
-
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('MONTHLY_DRAW_PROPERTIES_TABLE_NAME', 'monthly_draw_properties_summary')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            Mes INTEGER PRIMARY KEY, Total_Sorteios_Mes INTEGER, Soma_Media_Mensal REAL,
+            Media_Pares_Mensal REAL, Media_Impares_Mensal REAL, Media_Primos_Mensal REAL);"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+            
     def _create_table_sequence_metrics(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS sequence_metrics (
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('SEQUENCE_METRICS_TABLE_NAME', 'sequence_metrics')
+        query = f"""CREATE TABLE IF NOT EXISTS {table_name} (
             sequence_description TEXT, sequence_type TEXT, length INTEGER, step INTEGER,
             specific_sequence TEXT, frequency_count INTEGER, support REAL,
-            PRIMARY KEY (sequence_type, length, step, specific_sequence)
-        );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'sequence_metrics' verificada/criada.")
+            PRIMARY KEY (sequence_type, length, step, specific_sequence));"""
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
-    def _create_table_frequencia_absoluta(self):
-        query = "CREATE TABLE IF NOT EXISTS frequencia_absoluta (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Absoluta\" INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'frequencia_absoluta' OK.")
-
-    def _create_table_frequencia_relativa(self):
-        query = "CREATE TABLE IF NOT EXISTS frequencia_relativa (\"Dezena\" INTEGER PRIMARY KEY, \"Frequencia Relativa\" REAL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'frequencia_relativa' OK.")
-
-    def _create_table_atraso_atual(self):
-        query = "CREATE TABLE IF NOT EXISTS atraso_atual (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Atual\" INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_atual' OK.")
-
-    def _create_table_atraso_maximo(self):
-        query = "CREATE TABLE IF NOT EXISTS atraso_maximo (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo' OK.")
+    def _create_table_ciclo_metric_frequency(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_METRIC_FREQUENCY_TABLE_NAME', 'ciclo_metric_frequency')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER, frequencia_no_ciclo INTEGER, PRIMARY KEY ({config_obj.CICLO_NUM_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
     
-    def _create_table_atraso_maximo_separado(self): 
-        query = "CREATE TABLE IF NOT EXISTS atraso_maximo_separado (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Maximo\" INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_maximo_separado' OK.")
+    def _create_table_ciclo_metric_atraso_medio(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_METRIC_ATRASO_MEDIO_TABLE_NAME', 'ciclo_metric_atraso_medio')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER, atraso_medio_no_ciclo REAL, PRIMARY KEY ({config_obj.CICLO_NUM_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
 
-    def _create_table_atraso_medio(self):
-        query = "CREATE TABLE IF NOT EXISTS atraso_medio (\"Dezena\" INTEGER PRIMARY KEY, \"Atraso Medio\" REAL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'atraso_medio' OK.")
+    def _create_table_ciclo_metric_atraso_maximo(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_METRIC_ATRASO_MAXIMO_TABLE_NAME', 'ciclo_metric_atraso_maximo')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER, atraso_maximo_no_ciclo INTEGER, PRIMARY KEY ({config_obj.CICLO_NUM_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_ciclo_metric_atraso_final(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_METRIC_ATRASO_FINAL_TABLE_NAME', 'ciclo_metric_atraso_final')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER, atraso_final_no_ciclo INTEGER, PRIMARY KEY ({config_obj.CICLO_NUM_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_ciclo_rank_frequency(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_RANK_FREQUENCY_TABLE_NAME', 'ciclo_rank_frequency')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER, {config_obj.DEZENA_COLUMN_NAME} INTEGER, frequencia_no_ciclo INTEGER, rank_freq_no_ciclo INTEGER, PRIMARY KEY ({config_obj.CICLO_NUM_COLUMN_NAME}, {config_obj.DEZENA_COLUMN_NAME}));"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_table_ciclo_group_metrics(self) -> None:
+        from .config import config_obj
+        table_name = self.get_table_name_from_config('CYCLE_GROUP_METRICS_TABLE_NAME', 'ciclo_group_metrics')
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({config_obj.CICLO_NUM_COLUMN_NAME} INTEGER PRIMARY KEY, avg_pares_no_ciclo REAL, avg_impares_no_ciclo REAL, avg_primos_no_ciclo REAL);"
+        if not self.table_exists(table_name): self._execute_ddl_query(query); logger.debug(f"Tabela '{table_name}' verificada/criada.")
+
+    def _create_all_tables(self) -> None:
+        """Verifica e cria todas as tabelas conhecidas se não existirem."""
+        logger.info("Verificando e criando todas as tabelas do banco de dados se não existirem...")
         
-    def _create_table_pair_metrics(self):
-        query = "CREATE TABLE IF NOT EXISTS pair_metrics (pair_str TEXT PRIMARY KEY, frequency INTEGER, last_contest INTEGER, current_delay INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'pair_metrics' OK.")
-
-    def _create_table_ciclos_detalhe(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclos_detalhe (ciclo_num INTEGER, concurso_inicio INTEGER, concurso_fim INTEGER, duracao_concursos INTEGER, numeros_faltantes TEXT, qtd_faltantes INTEGER, PRIMARY KEY(ciclo_num, concurso_inicio));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_detalhe' OK.")
-
-    def _create_table_ciclos_sumario_estatisticas(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclos_sumario_estatisticas (summary_id INTEGER PRIMARY KEY DEFAULT 1, total_ciclos_fechados INTEGER, duracao_media_ciclo REAL, duracao_min_ciclo INTEGER, duracao_max_ciclo INTEGER, duracao_mediana_ciclo REAL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclos_sumario_estatisticas' OK.")
+        creation_methods = [
+            self._create_table_draws, self._create_table_draw_results_flat,
+            self._create_table_analysis_delays, self._create_table_analysis_frequency_overall,
+            self._create_table_analysis_recurrence_cdf, self._create_table_analysis_rank_trend_metrics,
+            self._create_table_analysis_cycle_status_dezenas, self._create_table_analysis_cycle_closing_propensity,
+            self._create_table_frequent_itemsets, self._create_table_analysis_itemset_metrics,
+            self._create_table_analysis_cycles_detail, self._create_table_analysis_cycles_summary,
+            self._create_table_analysis_cycle_progression_raw,
+            self._create_table_propriedades_numericas_por_concurso,
+            self._create_table_analise_repeticao_concurso_anterior,
+            self._create_table_chunk_metrics,
+            self._create_table_draw_position_frequency,
+            self._create_table_geral_ma_frequency, self._create_table_geral_ma_delay,
+            self._create_table_association_rules, self._create_table_grid_line_distribution,
+            self._create_table_grid_column_distribution, self._create_table_statistical_tests_results,
+            self._create_table_monthly_number_frequency, self._create_table_monthly_draw_properties_summary,
+            self._create_table_sequence_metrics,
+            self._create_table_ciclo_metric_frequency, self._create_table_ciclo_metric_atraso_medio,
+            self._create_table_ciclo_metric_atraso_maximo, self._create_table_ciclo_metric_atraso_final,
+            self._create_table_ciclo_rank_frequency, self._create_table_ciclo_group_metrics,
+        ]
         
-    def _create_table_ciclo_progression(self):
-        query = """CREATE TABLE IF NOT EXISTS ciclo_progression (
-                    Concurso INTEGER, Data TEXT, ciclo_num_associado INTEGER, 
-                    dezenas_sorteadas_neste_concurso TEXT, 
-                    numeros_que_faltavam_antes_deste_concurso TEXT, 
-                    qtd_faltavam_antes_deste_concurso INTEGER, 
-                    dezenas_apuradas_neste_concurso TEXT, 
-                    qtd_apuradas_neste_concurso INTEGER, 
-                    numeros_faltantes_apos_este_concurso TEXT, 
-                    qtd_faltantes_apos_este_concurso INTEGER, 
-                    ciclo_fechou_neste_concurso INTEGER,
-                    PRIMARY KEY (Concurso, ciclo_num_associado)
-                 );"""
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_progression' OK.")
+        for method_func in creation_methods:
+            try:
+                method_func()
+            except Exception as e_create:
+                method_name = method_func.__name__ if hasattr(method_func, '__name__') else 'desconhecido'
+                logger.error(f"Erro ao tentar executar método de criação de tabela '{method_name}': {e_create}", exc_info=True)
+        logger.info("Verificação e criação de tabelas (definidas na lista) concluída.")
 
-    def _create_table_ciclo_metric_frequency(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_frequency' OK.")
-    
-    def _create_table_ciclo_metric_atraso_medio(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_medio (ciclo_num INTEGER, dezena INTEGER, atraso_medio_no_ciclo REAL, PRIMARY KEY (ciclo_num, dezena));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_medio' OK.")
-
-    def _create_table_ciclo_metric_atraso_maximo(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_maximo (ciclo_num INTEGER, dezena INTEGER, atraso_maximo_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_maximo' OK.")
-
-    def _create_table_ciclo_metric_atraso_final(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_metric_atraso_final (ciclo_num INTEGER, dezena INTEGER, atraso_final_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_metric_atraso_final' OK.")
-
-    def _create_table_ciclo_rank_frequency(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_rank_frequency (ciclo_num INTEGER, dezena INTEGER, frequencia_no_ciclo INTEGER, rank_freq_no_ciclo INTEGER, PRIMARY KEY (ciclo_num, dezena));"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_rank_frequency' OK.")
-
-    def _create_table_ciclo_group_metrics(self):
-        query = "CREATE TABLE IF NOT EXISTS ciclo_group_metrics (ciclo_num INTEGER PRIMARY KEY, avg_pares_no_ciclo REAL, avg_impares_no_ciclo REAL, avg_primos_no_ciclo REAL);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'ciclo_group_metrics' OK.")
-
-    def _create_table_propriedades_numericas_por_concurso(self):
-        query = "CREATE TABLE IF NOT EXISTS propriedades_numericas_por_concurso (\"Concurso\" INTEGER PRIMARY KEY, soma_dezenas INTEGER, pares INTEGER, impares INTEGER, primos INTEGER);" 
-        self._execute_query(query, commit=True); logger.debug("Tabela 'propriedades_numericas_por_concurso' OK.")
-
-    def _create_table_analise_repeticao_concurso_anterior(self):
-        query = "CREATE TABLE IF NOT EXISTS analise_repeticao_concurso_anterior (\"Concurso\" INTEGER PRIMARY KEY, \"Data\" TEXT, \"QtdDezenasRepetidas\" INTEGER, \"DezenasRepetidas\" TEXT);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'analise_repeticao_concurso_anterior' OK.")
-    
-    def _create_table_rank_geral_dezenas_por_frequencia(self):
-        query = "CREATE TABLE IF NOT EXISTS rank_geral_dezenas_por_frequencia (Dezena INTEGER PRIMARY KEY, frequencia_total INTEGER, rank_geral INTEGER);"
-        self._execute_query(query, commit=True); logger.debug("Tabela 'rank_geral_dezenas_por_frequencia' OK.")
-
-    def _create_table_chunk_metrics(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS chunk_metrics (
-            chunk_type TEXT,
-            chunk_size INTEGER,
-            chunk_start_draw_id INTEGER,
-            chunk_end_draw_id INTEGER,
-            number INTEGER,
-            frequency_in_chunk_abs INTEGER,
-            frequency_in_chunk_rel REAL,
-            current_delay_in_chunk INTEGER,
-            max_delay_in_chunk INTEGER,
-            avg_delay_in_chunk REAL,
-            delay_std_dev REAL,
-            occurrence_std_dev REAL,
-            PRIMARY KEY (chunk_type, chunk_size, chunk_start_draw_id, number)
-        )
-        """
-        self._execute_query(query, commit=True) 
-        logger.debug("Tabela 'chunk_metrics' verificada/criada.")
-
-
-    def __enter__(self): 
-        self.connect()
+    def __enter__(self):
+        if not self.conn: self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb): 
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+# Bloco if __name__ == '__main__' para teste direto
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    db_test_path = None 
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(
+            level=logging.DEBUG, 
+            format='%(asctime)s - %(name)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s',
+            handlers=[logging.StreamHandler()]
+        )
+    
+    db_test_path_in_memory = ":memory:" 
+    logger.info(f"Usando banco de dados de teste em: {db_test_path_in_memory}")
+    
+    db_m = None
     try:
-        current_script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_base_dir = os.path.dirname(current_script_dir) 
-        data_dir = os.path.join(project_base_dir, 'Data')
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir) 
-            logger.info(f"Diretório '{data_dir}' criado.")
-            
-        db_test_path = os.path.join(data_dir, 'test_lotofacil_manager.db')
-        logger.info(f"Usando banco de dados de teste em: {db_test_path}")
-        
-        db_m = DatabaseManager(db_path=db_test_path)
-        db_m._create_all_tables() 
-        
-        logger.info(f"Tabelas no banco de dados: {db_m.get_table_names()}")
+        # Importar config_obj aqui para o contexto de teste
+        from src.config import config_obj
+        if not config_obj:
+            raise ImportError("config_obj não pôde ser importado ou é None para o teste do DatabaseManager")
 
-        tables_to_check = [
-            'draw_position_frequency', 'geral_ma_frequency', 'geral_ma_delay', 
-            'geral_recurrence_analysis', 'association_rules',
-            'grid_line_distribution', 'grid_column_distribution',
-            'statistical_tests_results', 'monthly_number_frequency',
-            'monthly_draw_properties_summary' # Nova verificação
-        ]
-        for table_name in tables_to_check:
-            if db_m.table_exists(table_name):
-                logger.info(f"Teste: Tabela '{table_name}' existe.")
-            else:
-                logger.error(f"Teste: Tabela '{table_name}' NÃO existe após _create_all_tables.")
+        db_m = DatabaseManager(db_path=db_test_path_in_memory)
+        db_m._create_all_tables() # Chama o método que executa todos os _create_table_*
+        
+        logger.info(f"Tabelas no banco de dados após _create_all_tables: {db_m.get_table_names()}")
 
-        # ... (restante do código de teste if __name__ == '__main__') ...
+        # Teste simples de save/load
+        test_df_data = {'col1': [1, 2, 3], 'col2': ['x', 'y', 'z']}
+        test_df = pd.DataFrame(test_df_data)
+        db_m.save_dataframe(test_df, 'test_table_for_manager')
+        loaded_df = db_m.load_dataframe('test_table_for_manager')
+        if loaded_df is not None and not loaded_df.empty and loaded_df.equals(test_df):
+            logger.info(f"Teste de save/load para 'test_table_for_manager' BEM-SUCEDIDO.")
+        else:
+            logger.error(f"Falha no teste de save/load para 'test_table_for_manager'. Carregado:\n{loaded_df}")
 
     except Exception as e_test:
-        logger.error(f"Erro no exemplo de uso do DatabaseManager: {e_test}", exc_info=True)
+        logger.error(f"Erro no script de teste do DatabaseManager: {e_test}", exc_info=True)
     finally:
-        if db_test_path and os.path.exists(db_test_path): 
-            try:
-                os.remove(db_test_path)
-                logger.info(f"Arquivo de teste '{db_test_path}' removido.")
-            except OSError as e_os:
-                logger.error(f"Erro ao remover arquivo de teste '{db_test_path}': {e_os}")
+        if db_m:
+            db_m.close()

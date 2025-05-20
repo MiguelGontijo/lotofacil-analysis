@@ -4,201 +4,209 @@ import logging
 import sys
 import os
 import pandas as pd
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 
-from src.config import config_obj 
-from src.data_loader import load_and_clean_data, load_cleaned_data
+# Importar Config e DatabaseManager PRIMEIRO
+from src.config import config_obj, Config 
 from src.database_manager import DatabaseManager
+
+from src.data_loader import load_and_clean_data, load_cleaned_data # Funções do seu data_loader.py
 from src.orchestrator import Orchestrator
 
-from src.analysis.combination_analysis import CombinationAnalyzer
-
+# --- Importações das Funções de Etapa do Pipeline ---
+# (Suas importações de execute_*.py permanecem aqui)
 from src.pipeline_steps.execute_frequency import run_frequency_analysis
 from src.pipeline_steps.execute_delay import run_delay_analysis
+# ... (todas as suas outras importações de pipeline_steps) ...
 from src.pipeline_steps.execute_max_delay import run_max_delay_analysis_step
 from src.pipeline_steps.execute_positional_analysis import run_positional_analysis_step
 from src.pipeline_steps.execute_recurrence_analysis import run_recurrence_analysis_step
 from src.pipeline_steps.execute_grid_analysis import run_grid_analysis_step
-# IMPORTAÇÃO DA NOVA ETAPA DE ANÁLISE SAZONAL
+from src.pipeline_steps.execute_statistical_tests import run_statistical_tests_step
 from src.pipeline_steps.execute_seasonality_analysis import run_seasonality_analysis_step
-from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_frequent_itemsets import run_frequent_itemsets_analysis_step
+from src.pipeline_steps.execute_pairs import run_pair_analysis_step
 from src.pipeline_steps.execute_association_rules import run_association_rules_step
 from src.pipeline_steps.execute_frequent_itemset_metrics import run_frequent_itemset_metrics_step
+from src.pipeline_steps.execute_properties import run_number_properties_analysis
+from src.pipeline_steps.execute_sequence_analysis import run_sequence_analysis_step
 from src.pipeline_steps.execute_cycles import run_cycle_identification_step
 from src.pipeline_steps.execute_cycle_stats import run_cycle_stats_step
 from src.pipeline_steps.execute_cycle_progression import run_cycle_progression_analysis_step
+from src.pipeline_steps.execute_cycle_closing_propensity import run_cycle_closing_propensity_analysis
 from src.pipeline_steps.execute_detailed_cycle_metrics import run_detailed_cycle_metrics_step
-from src.pipeline_steps.execute_properties import run_number_properties_analysis
-from src.pipeline_steps.execute_statistical_tests import run_statistical_tests_step
 from src.pipeline_steps.execute_repetition_analysis import run_repetition_analysis_step
 from src.pipeline_steps.execute_temporal_trend_analysis import run_temporal_trend_analysis_step
 from src.pipeline_steps.execute_chunk_evolution_analysis import run_chunk_evolution_analysis_step
 from src.pipeline_steps.execute_block_aggregation import run_block_aggregation_step
 from src.pipeline_steps.execute_rank_trend_analysis import run_rank_trend_analysis_step
-from src.pipeline_steps.execute_metrics_viz import run_metrics_visualization_step
-from src.pipeline_steps.execute_chunk_evolution_visualization import run_chunk_evolution_visualization_step
-from src.pipeline_steps.execute_sequence_analysis import run_sequence_analysis_step
 
+
+# Configuração de Logging (como na sua versão mais recente)
 if config_obj:
     logging.basicConfig(
         level=config_obj.LOG_LEVEL,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format='%(asctime)s - %(name)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s',
         handlers=[
-            logging.FileHandler(config_obj.LOG_FILE, mode='a'),
+            logging.FileHandler(config_obj.LOG_FILE, mode='w', encoding='utf-8'),
             logging.StreamHandler(sys.stdout)
-        ]
+        ],
+        force=True
     )
 else:
-    logging.basicConfig(level="INFO", format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
+    logging.basicConfig(
+        level="INFO", 
+        format='%(asctime)s - %(name)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
     logging.critical("Falha ao carregar config_obj. Usando logging de fallback.")
 
 logger = logging.getLogger(__name__)
 
-def main():
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 200)
+pd.set_option('display.max_colwidth', 80)
+
+
+def main(cmd_args: argparse.Namespace):
     if not config_obj:
         logger.critical("Objeto de configuração não está disponível. Encerrando a aplicação.")
         return
 
-    parser = argparse.ArgumentParser(description="Aplicativo de Análise da Lotofácil.")
-    parser.add_argument(
-        "--force-reload", action="store_true",
-        help="Força o recarregamento dos dados do arquivo CSV bruto."
-    )
-
-    logger.info("Inicializando componentes...")
-    main_all_data_df = pd.DataFrame()
-    db_manager = None
+    logger.info(f"Aplicação Lotofacil Analysis iniciada com argumentos: {cmd_args}")
+    
+    all_data_df: Optional[pd.DataFrame] = None
 
     try:
-        raw_file_path = os.path.join(config_obj.DATA_DIR, config_obj.RAW_DATA_FILE_NAME)
-        cleaned_pickle_path = os.path.join(config_obj.DATA_DIR, config_obj.CLEANED_DATA_FILE_NAME)
+        # Caminhos para os arquivos de dados, usando config_obj
+        raw_file_full_path = config_obj.HISTORICO_CSV_PATH
+        cleaned_pickle_full_path = config_obj.CLEANED_DATA_PATH
 
-        args_temp, _ = parser.parse_known_args()
-        force_reload_data = args_temp.force_reload
+        if not cmd_args.force_reload:
+            logger.info(f"Tentando carregar dados limpos de: {cleaned_pickle_full_path}")
+            # A função load_cleaned_data no seu data_loader.py espera data_dir_path
+            all_data_df = load_cleaned_data(config_obj.DATA_DIR) 
+        
+        if all_data_df is None or all_data_df.empty or cmd_args.force_reload:
+            action_msg = "--force-reload especificado." if cmd_args.force_reload else "Dados limpos não encontrados ou vazios."
+            logger.info(f"{action_msg} Processando dados brutos de: {raw_file_full_path}")
             
-        if not force_reload_data:
-            logger.info(f"Tentando carregar dados limpos de: {cleaned_pickle_path}")
-            main_all_data_df = load_cleaned_data(config_obj.DATA_DIR) 
+            # ***** CORREÇÃO DA CHAMADA load_and_clean_data *****
+            # A função espera: load_and_clean_data(raw_file_path: str, cleaned_file_path_to_save: str)
+            all_data_df = load_and_clean_data(
+                raw_file_path=raw_file_full_path, 
+                cleaned_file_path_to_save=cleaned_pickle_full_path
+            )
+            # O terceiro argumento 'config=config_obj' foi removido pois não é esperado pela função.
 
-        if main_all_data_df.empty:
-            action_msg = "--force-reload especificado." if force_reload_data else "Dados limpos não encontrados ou vazios."
-            logger.info(f"{action_msg} Processando dados brutos de: {raw_file_path}")
-            main_all_data_df = load_and_clean_data(raw_file_path, cleaned_pickle_path)
-
-        if main_all_data_df.empty:
-            logger.error("Nenhum dado carregado. Verifique os arquivos e configurações.")
+        if all_data_df is None or all_data_df.empty:
+            logger.error("Nenhum dado carregado. Verifique os arquivos de dados e as configurações. Encerrando.")
             return
         
-        logger.info(f"{len(main_all_data_df)} sorteios carregados para análise.")
+        logger.info(f"{len(all_data_df)} sorteios carregados para análise.")
         
-        db_manager = DatabaseManager(db_path=config_obj.DB_PATH)
-        db_manager._create_all_tables() 
-        logger.info("Verificação e criação de tabelas do banco de dados concluída pelo main.")
-
-        combination_analyzer = CombinationAnalyzer(all_numbers=config_obj.ALL_NUMBERS)
-        
-        shared_context_for_orchestrator: Dict[str, Any] = {
-            "config": config_obj,
-            "db_manager": db_manager,
-            "all_data_df": main_all_data_df, 
-            "combination_analyzer": combination_analyzer
-        }
-        shared_context_for_orchestrator["shared_context"] = shared_context_for_orchestrator
+        # --- Definição do Pipeline de Análise ---
+        # (A definição do PIPELINE_CONFIG que você tem aqui permanece a mesma por enquanto)
+        # Certifique-se que as assinaturas das funções run_*_step correspondam aos "args"
+        default_step_args = ["all_data_df", "db_manager", "config", "shared_context"]
+        db_config_shared_args = ["db_manager", "config", "shared_context"]
 
         main_analysis_pipeline_config: List[Dict[str, Any]] = [
-            # Análises Fundamentais (Dezenas Individuais)
-            {"name": "frequency_analysis", "func": run_frequency_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "delay_analysis", "func": run_delay_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "max_delay_analysis", "func": run_max_delay_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "positional_analysis", "func": run_positional_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "recurrence_analysis", "func": run_recurrence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "grid_analysis", "func": run_grid_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "statistical_tests", "func": run_statistical_tests_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            # NOVA ETAPA DE ANÁLISE SAZONAL ADICIONADA AQUI
-            {"name": "seasonality_analysis", "func": run_seasonality_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            {"name": "frequency_analysis", "func": run_frequency_analysis, "args": default_step_args},
+            {"name": "delay_analysis", "func": run_delay_analysis, "args": default_step_args},
+            # {"name": "max_delay_analysis", "func": run_max_delay_analysis_step, "args": default_step_args},
+            {"name": "positional_analysis", "func": run_positional_analysis_step, "args": default_step_args},
+            {"name": "recurrence_analysis", "func": run_recurrence_analysis_step, "args": default_step_args},
+            {"name": "grid_analysis", "func": run_grid_analysis_step, "args": default_step_args},
+            {"name": "statistical_tests", "func": run_statistical_tests_step, "args": default_step_args},
+            {"name": "seasonality_analysis", "func": run_seasonality_analysis_step, "args": default_step_args},
+            
+            {"name": "frequent_itemsets_analysis", "func": run_frequent_itemsets_analysis_step, 
+             "args": default_step_args, 
+             "output_key": "combination_analyzer_instance"},
+            
+            {"name": "pair_analysis", "func": run_pair_analysis_step, 
+             "args": default_step_args + ["combination_analyzer_instance"]},
+            
+            {"name": "association_rules", "func": run_association_rules_step, 
+             "args": db_config_shared_args + ["combination_analyzer_instance"]},
 
-            # Análises de Relações e Conjuntos
-            {"name": "pair_analysis", "func": run_pair_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
-            {"name": "frequent_itemsets_analysis", "func": run_frequent_itemsets_analysis_step, "args": ["all_data_df", "db_manager", "combination_analyzer", "config", "shared_context"]},
-            {"name": "association_rules", "func": run_association_rules_step, "args": ["db_manager", "combination_analyzer", "config", "shared_context"]},
-            {"name": "frequent_itemset_metrics_analysis", "func": run_frequent_itemset_metrics_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "number_properties", "func": run_number_properties_analysis, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "sequence_analysis", "func": run_sequence_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            {"name": "frequent_itemset_metrics_analysis", "func": run_frequent_itemset_metrics_step, "args": default_step_args},
+            {"name": "number_properties", "func": run_number_properties_analysis, "args": default_step_args},
+            {"name": "sequence_analysis", "func": run_sequence_analysis_step, "args": default_step_args},
             
-            # Análises Cíclicas
-            {"name": "cycle_identification", "func": run_cycle_identification_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "cycle_stats", "func": run_cycle_stats_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "cycle_progression", "func": run_cycle_progression_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "detailed_cycle_metrics", "func": run_detailed_cycle_metrics_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            {"name": "cycle_identification", "func": run_cycle_identification_step, 
+             "args": default_step_args, "output_key": "cycles_detail_df"}, 
             
-            # Análises de Evolução Temporal e Blocos
-            {"name": "repetition_analysis", "func": run_repetition_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "temporal_trend_analysis", "func": run_temporal_trend_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
-            {"name": "chunk_evolution_analysis", "func": run_chunk_evolution_analysis_step, "args": ["all_data_df", "db_manager", "config", "shared_context"]},
+            {"name": "cycle_stats", "func": run_cycle_stats_step, 
+             "args": ["all_data_df", "db_manager", "config", "shared_context"]},
             
-            # Agregação e Ranking (dependem de outras análises já terem populado o BD)
-            {"name": "block_aggregation", "func": run_block_aggregation_step, "args": ["db_manager", "config", "shared_context"]}, 
-            {"name": "rank_trend_analysis", "func": run_rank_trend_analysis_step, "args": ["db_manager", "config", "shared_context"]},
+            {"name": "cycle_progression", "func": run_cycle_progression_analysis_step, "args": default_step_args},
+            
+            {"name": "cycle_closing_propensity", "func": run_cycle_closing_propensity_analysis, 
+             "args": db_config_shared_args + ["cycles_detail_df"]}, 
+
+            {"name": "detailed_cycle_metrics", "func": run_detailed_cycle_metrics_step, 
+             "args": default_step_args + ["cycles_detail_df"]},
+
+            {"name": "repetition_analysis", "func": run_repetition_analysis_step, "args": default_step_args},
+            {"name": "temporal_trend_analysis", "func": run_temporal_trend_analysis_step, "args": default_step_args},
+            {"name": "chunk_evolution_analysis", "func": run_chunk_evolution_analysis_step, "args": default_step_args},
+            {"name": "block_aggregation", "func": run_block_aggregation_step, "args": db_config_shared_args}, 
+            {"name": "rank_trend_analysis", "func": run_rank_trend_analysis_step, "args": db_config_shared_args + ["all_data_df"]},
         ]
-
-        visualization_pipeline_config: List[Dict[str, Any]] = [
-             {"name": "metrics_visualization", "func": run_metrics_visualization_step, "args": ["db_manager", "config", "shared_context"]},
-             {"name": "chunk_evolution_visualization", "func": run_chunk_evolution_visualization_step, "args": ["db_manager", "config", "shared_context"]}
-        ]
         
-        all_analysis_step_names = [step_config["name"] for step_config in main_analysis_pipeline_config]
-        all_viz_step_names = [step_config["name"] for step_config in visualization_pipeline_config]
-        
-        available_steps_for_argparse = ["all_analysis"] + all_analysis_step_names + all_viz_step_names 
-        
-        parser.add_argument(
-            "--run-steps", nargs='+', choices=list(set(available_steps_for_argparse)),
-            help=(f"Execute etapas específicas. Use 'all_analysis' para todas as análises principais. Disponíveis: {', '.join(sorted(list(set(available_steps_for_argparse))))}")
-        )
-        args = parser.parse_args() 
-
-        pipeline_to_run_config: List[Dict[str, Any]] = []
-        
-        if args.run_steps:
-            requested_steps = args.run_steps
-            if "all_analysis" in requested_steps:
-                pipeline_to_run_config = main_analysis_pipeline_config
+        pipeline_to_run_actual: List[Dict[str, Any]] = []
+        if cmd_args.run_steps:
+            if "all_analysis" in cmd_args.run_steps:
+                pipeline_to_run_actual = main_analysis_pipeline_config
             else:
-                all_available_step_configs = main_analysis_pipeline_config + visualization_pipeline_config
-                for step_name in requested_steps:
-                    found_step_config = next((sc for sc in all_available_step_configs if sc["name"] == step_name), None)
-                    if found_step_config: 
-                        if found_step_config not in pipeline_to_run_config:
-                           pipeline_to_run_config.append(found_step_config)
-                    else: 
-                        logger.warning(f"Step '{step_name}' não reconhecido e será ignorado.")
-        elif force_reload_data and not args.run_steps: 
-            logger.info("Opção --force-reload ativada sem --run-steps específico. Executando 'all_analysis'.")
-            pipeline_to_run_config = main_analysis_pipeline_config
-        else: 
-            logger.info("Nenhuma ação especificada (ex: --run-steps ou --force-reload com intenção de recalcular). Use --help para opções.")
-            parser.print_help()
-            if db_manager: db_manager.close()
-            return
-
-        if pipeline_to_run_config:
-            logger.info(f"Preparando para executar pipeline com steps: {[s['name'] for s in pipeline_to_run_config]}")
-            orchestrator = Orchestrator(pipeline=pipeline_to_run_config, db_manager=db_manager)
-            
-            for key, value in shared_context_for_orchestrator.items():
-                 orchestrator.set_shared_context(key, value) 
-
-            orchestrator.run()
-        elif args.run_steps: 
-             logger.info("Nenhuma etapa válida selecionada para execução via --run-steps.")
+                for step_name in cmd_args.run_steps:
+                    found_step = next((s for s in main_analysis_pipeline_config if s["name"] == step_name), None)
+                    if found_step:
+                        if found_step not in pipeline_to_run_actual:
+                           pipeline_to_run_actual.append(found_step)
+                    else:
+                        logger.warning(f"Etapa solicitada '{step_name}' não encontrada na configuração principal. Será ignorada.")
+        elif cmd_args.force_reload: 
+            logger.info("Opção --force-reload ativada. Executando todas as etapas de análise ('all_analysis').")
+            pipeline_to_run_actual = main_analysis_pipeline_config
         
+        if not pipeline_to_run_actual and not cmd_args.run_strategy_flow :
+             logger.info("Nenhuma etapa de pipeline solicitada para execução. Use --run-steps all_analysis ou --force-reload.")
+        elif pipeline_to_run_actual:
+            with DatabaseManager(db_path=config_obj.DB_PATH) as db_m:
+                logger.info(f"Executando pipeline com etapas: {[s['name'] for s in pipeline_to_run_actual]}")
+                orchestrator = Orchestrator(pipeline=pipeline_to_run_actual, db_manager=db_m)
+
+                orchestrator.set_shared_context('all_data_df', all_data_df)
+                orchestrator.set_shared_context('config', config_obj)
+                orchestrator.set_shared_context('shared_context', orchestrator.shared_context) 
+
+                logger.info("Verificando e criando estrutura do banco de dados...")
+                db_m._create_all_tables() 
+
+                logger.info(f"Iniciando o Orchestrator. Contexto inicial: {list(orchestrator.shared_context.keys())}")
+                orchestrator.run()
+        
+    except FileNotFoundError as fnf_error:
+        logger.critical(f"Erro de arquivo não encontrado: {fnf_error}.", exc_info=True)
+    except KeyError as key_error:
+        logger.critical(f"Erro de chave não encontrada (KeyError): {key_error}", exc_info=True)
     except Exception as e:
         logger.critical(f"Erro fatal na execução principal: {e}", exc_info=True)
     finally:
-        if db_manager:
-            db_manager.close()
-        logger.info("Aplicação finalizada.")
+        logger.info("Aplicação principal finalizada.")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Aplicativo de Análise da Lotofácil.")
+    parser.add_argument("--force-reload", action="store_true", help="Força o recarregamento dos dados do arquivo CSV bruto.")
+    parser.add_argument("--run-steps", nargs='*', help="Execute etapas específicas (ou 'all_analysis'). Ex: --run-steps frequency_analysis delay_analysis")
+    parser.add_argument("--run-strategy-flow", action="store_true", help="Executa o fluxo de agregação e teste de estratégias.")
+    
+    parsed_args = parser.parse_args()
+    
+    if parsed_args.run_steps is not None and not parsed_args.run_steps: 
+        logger.warning("--run-steps foi especificado sem nenhuma etapa. Nenhuma etapa de análise será executada. Forneça nomes de etapas ou 'all_analysis'.")
+
+    main(cmd_args=parsed_args)

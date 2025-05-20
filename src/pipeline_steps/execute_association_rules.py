@@ -1,44 +1,56 @@
-# src/pipeline_steps/execute_association_rules.py
+# Lotofacil_Analysis/src/pipeline_steps/execute_association_rules.py
 import logging
 import pandas as pd
 from typing import Any, Dict
 
+# Para type hints mais específicos:
+from src.analysis.combination_analysis import CombinationAnalyzer
+# from src.database_manager import DatabaseManager
+# from src.config import Config
+
 logger = logging.getLogger(__name__)
 
 def run_association_rules_step(
-    db_manager: Any,
-    combination_analyzer: Any,
-    config: Any,
+    db_manager: Any, # DatabaseManager
+    config: Any, # Config
     shared_context: Dict[str, Any],
+    combination_analyzer_instance: CombinationAnalyzer, # CORRIGIDO
     **kwargs
 ) -> bool:
     step_name = "Geração de Regras de Associação"
     logger.info(f"==== Iniciando Etapa: {step_name} ====")
 
-    if not hasattr(config, 'ASSOCIATION_RULES_MIN_CONFIDENCE') or \
-       not hasattr(config, 'ASSOCIATION_RULES_MIN_LIFT') or \
-       not hasattr(config, 'ASSOCIATION_RULES_TABLE_NAME'):
-        logger.error("Atributos de configuração necessários para as Regras de Associação não encontrados.")
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+    required_attrs = [
+        'ASSOCIATION_RULES_MIN_CONFIDENCE', 'ASSOCIATION_RULES_MIN_LIFT',
+        'ASSOCIATION_RULES_TABLE_NAME'
+    ]
+    for attr in required_attrs:
+        if not hasattr(config, attr):
+            logger.error(f"{step_name}: Atributo de config '{attr}' não encontrado.")
+            return False
+
+    if combination_analyzer_instance is None:
+        logger.error(f"{step_name}: Instância 'combination_analyzer_instance' é None.")
         return False
 
-    if not hasattr(combination_analyzer, 'generate_association_rules'):
-        logger.error("Objeto 'combination_analyzer' não possui o método 'generate_association_rules'.")
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+    if not hasattr(combination_analyzer_instance, 'generate_association_rules'):
+        logger.error(f"{step_name}: 'combination_analyzer_instance' não possui 'generate_association_rules'.")
         return False
-            
+
     if not hasattr(db_manager, 'save_dataframe'):
-        logger.error("Objeto 'db_manager' não possui o método 'save_dataframe'.")
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+        logger.error(f"{step_name}: Objeto 'db_manager' não possui o método 'save_dataframe'.")
         return False
 
-    # CORREÇÃO AQUI: Usar a chave correta para buscar o DataFrame
     mlxtend_frequent_itemsets_df = shared_context.get('mlxtend_frequent_itemsets_df_for_rules')
+    
+    empty_rules_cols = ['antecedents_str', 'consequents_str', 'antecedent support', 
+                        'consequent support', 'support', 'confidence', 'lift', 
+                        'leverage', 'conviction']
 
     if not isinstance(mlxtend_frequent_itemsets_df, pd.DataFrame) or mlxtend_frequent_itemsets_df.empty:
-        logger.warning("DataFrame 'mlxtend_frequent_itemsets_df_for_rules' não encontrado ou vazio no shared_context. Nenhuma regra será gerada.")
-        logger.info(f"==== Etapa: {step_name} CONCLUÍDA (sem itemsets para processar) ====")
-        shared_context['association_rules_df'] = pd.DataFrame()
+        logger.warning(f"{step_name}: 'mlxtend_frequent_itemsets_df_for_rules' não encontrado/vazio. Nenhuma regra gerada.")
+        db_manager.save_dataframe(pd.DataFrame(columns=empty_rules_cols), config.ASSOCIATION_RULES_TABLE_NAME, if_exists='replace')
+        shared_context['association_rules_df'] = pd.DataFrame(columns=empty_rules_cols)
         return True
 
     min_confidence = config.ASSOCIATION_RULES_MIN_CONFIDENCE
@@ -46,9 +58,9 @@ def run_association_rules_step(
     association_rules_table_name = config.ASSOCIATION_RULES_TABLE_NAME
 
     try:
-        logger.info(f"Gerando regras de associação com min_confidence={min_confidence}, min_lift={min_lift}...")
-        
-        rules_df = combination_analyzer.generate_association_rules(
+        logger.info(f"Gerando regras com min_confidence={min_confidence}, min_lift={min_lift}...")
+
+        rules_df = combination_analyzer_instance.generate_association_rules(
             frequent_itemsets_mlxtend_df=mlxtend_frequent_itemsets_df,
             metric="confidence",
             min_threshold=min_confidence,
@@ -56,25 +68,29 @@ def run_association_rules_step(
         )
 
         if not isinstance(rules_df, pd.DataFrame):
-            logger.error("A geração de regras de associação não retornou um DataFrame.")
-            logger.info(f"==== Etapa: {step_name} FALHOU ====")
+            logger.error(f"{step_name}: Geração de regras não retornou um DataFrame.")
+            db_manager.save_dataframe(pd.DataFrame(columns=empty_rules_cols), association_rules_table_name, if_exists='replace')
+            shared_context['association_rules_df'] = pd.DataFrame(columns=empty_rules_cols)
             return False
-        
+
         if rules_df.empty:
-            logger.info(f"Nenhuma regra de associação gerada com os critérios especificados. Nada será salvo na tabela '{association_rules_table_name}'.")
+            logger.info(f"{step_name}: Nenhuma regra gerada. Tabela '{association_rules_table_name}' vazia.")
+            db_manager.save_dataframe(pd.DataFrame(columns=empty_rules_cols), association_rules_table_name, if_exists='replace')
         else:
-            db_manager.save_dataframe(rules_df, 
-                                      association_rules_table_name, 
+            final_rules_df = rules_df[[col for col in empty_rules_cols if col in rules_df.columns]].copy()
+            db_manager.save_dataframe(final_rules_df,
+                                      association_rules_table_name,
                                       if_exists='replace')
-            logger.info(f"{len(rules_df)} regras de associação salvas na tabela: {association_rules_table_name}")
+            logger.info(f"{len(final_rules_df)} regras de associação salvas em: {association_rules_table_name}")
         
-        shared_context['association_rules_df'] = rules_df
-        logger.info(f"Resultado da {step_name} adicionado ao dicionário shared_context como 'association_rules_df'.")
+        shared_context['association_rules_df'] = rules_df if not rules_df.empty else pd.DataFrame(columns=empty_rules_cols)
+        logger.info(f"Resultado de {step_name} adicionado ao shared_context.")
 
     except Exception as e:
         logger.error(f"Erro durante a execução da {step_name}: {e}", exc_info=True)
-        logger.info(f"==== Etapa: {step_name} FALHOU ====")
+        db_manager.save_dataframe(pd.DataFrame(columns=empty_rules_cols), association_rules_table_name, if_exists='replace')
+        shared_context['association_rules_df'] = pd.DataFrame(columns=empty_rules_cols)
         return False
-            
+
     logger.info(f"==== Etapa: {step_name} CONCLUÍDA ====")
     return True

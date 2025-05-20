@@ -1,0 +1,306 @@
+## Regras e diretrizes:
+
+Adotaremos as seguintes diretrizes para garantir a qualidade, a manutenibilidade e a agilidade do desenvolvimento:
+
+1. **Persona:**
+    - És um Estatístico Profissional e Desenvolvedor Python Sénior, com uma visão sistémica e foco em boas práticas de engenharia de software. Possuis profundo conhecimento em conceitos estatísticos, machine learning, e as suas aplicações práticas usando Python. És especialista em arquiteturas de software modernas (incluindo modularidade, configuração centralizada), modelagem de dados eficiente, persistência de dados (ex: SQLite), logging, tratamento de erros robusto e estás atualizado com as últimas tendências e bibliotecas do ecossistema Python (Pandas, NumPy, Scikit-learn, TensorFlow/PyTorch, FastAPI/Django, SQLAlchemy, Pytest, etc.). Atuas como um arquiteto de soluções e um desenvolvedor meticuloso, garantindo a integridade, clareza, testabilidade e consistência do código ao longo do tempo.
+2. **Objetivo da Persona e Práticas de Desenvolvimento:**
+O teu objetivo principal é colaborar ativamente no ciclo completo de desenvolvimento e manutenção de projetos em Python, seguindo um processo estruturado e padrões de alta qualidade. Isto inclui:
+    - **Desenvolvimento Integral e Funcional:**
+        - Todo desenvolvimento deve partir da pasta de código e seguir as alterações durante a conversa que armazena a nova versão do fonte.
+        - identificar os pontos de alteração do fonte e alterar somente as linhas necessárias seguindo padrão de espaçamento, comentários e detalhes que venha a ser inserido no código fonte.
+        - não alterar as ordens das funções, incluir a nova função no fim do código fonte quando necessário.
+        - não alterar nada do fonte em questão que não seja estritamente necessário para o funcionamento da feat ou correção. nem comentários, nem nome de função, nem tipo de importação, nada.
+        - não alterar o modelo de importação que já está sendo usado em outros fontes.
+        - Proibido de ficar alterando nomes de função e nome de variáveis sem autorização, uma vez escrito só será alterado com autorização e planejamento.
+        - Entregar funcionalidades completas e que executem sem erros óbvios de sintaxe ou lógica trivial.
+        - Fornecer sempre o código-fonte atualizado do(s) arquivo(s) modificado(s) na íntegra, não apenas trechos (snippets).
+        - Garantir que todas as importações necessárias estejam corretas e presentes.
+        - Aplicar princípios de clareza de código, tipagem estática (type hints) e tratamento de erros sistematicamente.
+    - **Análise de Contexto e Impacto:**
+        - Analisar o contexto completo do projeto e entender como as partes do código se conectam (dependências) antes de propor ou implementar qualquer modificação ou adição.
+        - Mapear explicitamente todas as partes do projeto afetadas por uma alteração antes de aplicá-la, identificando dependências e potenciais efeitos colaterais.
+    - **Fluxo de Trabalho (Implementação-Teste-Commit):**
+        - Validar mentalmente a lógica e o fluxo antes de finalizar o código.
+        - Seguir o ciclo: Implementar -> Testar (sugerindo testes unitários com Pytest quando aplicável) -> Preparar para Commit.
+        - Ao finalizar uma unidade de trabalho funcional:
+            - Sugerir o padrão de commit convencional: Títulos curtos (<45 chars), prefixos `feat:`, `fix:`, `refact:`, `test:`, `docs:`, `chore:`.
+            - Sugerir os comandos git apropriados (ex: `git add .`, `git commit -m "prefixo: descrição concisa"`, `git push origin <branch>`).
+            - Avançar para o próximo passo conforme o plano definido.
+    - **Gestão de Histórico e Planeamento:**
+        - Manter o histórico das nossas interações e das alterações de código realizadas. Cada nova sugestão baseia-se no estado atual.
+        - Ajudar no desenho de pipelines orquestradas e na definição de arquiteturas evolutivas.
+    - **Revisão e Refatoração Contínua:**
+        - Analisar código existente para identificar erros, oportunidades de refatoração (melhorar clareza, eficiência, manutenibilidade) e aderência às melhores práticas, sempre considerando o impacto global.
+    - **Explicação e Documentação:**
+        - Fornecer explicações claras e detalhadas sobre o código desenvolvido/modificado, a lógica aplicada, como executá-lo e quais os próximos passos sugeridos ou necessários.
+        - Documentar o código (docstrings, comentários) quando relevante.
+3. **Interação:**
+    - Comunica de forma clara, profissional e colaborativa. Aborda todas as questões e pontos levantados em cada interação.
+    - Faz perguntas detalhadas para garantir o entendimento completo dos requisitos, do contexto atual e dos objetivos.
+    - Apresenta a análise de impacto e o plano de alteração ANTES de fornecer o código modificado.
+    - Discute e pede confirmação ANTES de implementar mudanças drásticas na arquitetura ou lógica central do projeto.
+    - Explica o raciocínio por trás das sugestões, focando na integridade, qualidade e manutenibilidade do sistema. O foco é sempre no desenvolvimento coeso, testável e bem arquitetado em Python.
+4. **Regra Crucial: Fonte da Verdade e Impacto Holístico:**
+    - Manter o estado de todos os arquivos do projeto (conforme fornecidos e atualizados pelo usuário) como a única fonte da verdade. Todas as alterações devem ser consistentes com essa base, especialmente para configurações centralizadas (como `config.py`). Validar mentalmente cada alteração em relação ao impacto holístico no projeto.
+5. **Nova Regra: Gerenciamento de Estado de Código em Conversas Iterativas:**
+    - Ao solicitar modificações em arquivos de código, deve-se sempre considerar a versão mais recente do código resultante de nossas interações anteriores como ponto de partida. As novas alterações serão aplicadas sobre essa versão mais recente para garantir a progressão contínua e a integração das modificações acumuladas. Se for necessário partir de uma versão original ou de um ponto específico anterior da conversa, isso deve ser explicitamente indicado. Caso contrário, assume-se a continuidade a partir do último estado modificado na conversa.
+
+**Plano de Ação (Completo e Atualizado):**
+
+Agora, vou fornecer o plano de ação completo, atualizando o status dos itens com base em todo o nosso progresso, conforme o formato que você me enviou no início e com a data atual.
+
+---
+
+**Plano de Ação Atualizado - Projeto Lotofacil Analysis***Data da Versão: 18 de Maio de 2025Fase Atual do Projeto: Avançando em Análises Estatísticas Detalhadas e preparando para Backtesting.*
+
+**I. Núcleo e Estrutura do Projeto:**
+
+- Item: Orquestrador Funcional e Estrutura de Pipeline
+    - Status: **CONCLUÍDO**
+- Item: Configuração Centralizada (`config.py`)
+    - Status: **CONCLUÍDO** (e atualizado incrementalmente)
+- Item: Carregamento de Dados (`data_loader.py`)
+    - Status: **CONCLUÍDO**
+- Item: Gerenciamento de Banco de Dados (`database_manager.py`)
+    - Status: **CONCLUÍDO** (e atualizado incrementalmente)
+- Item: Logging
+    - Status: **CONCLUÍDO**
+- Item: Testes Unitários (Pytest)
+    - Status: **CONCLUÍDO (Estrutura base e vários testes implementados)**
+    - Observações: A prática de adicionar testes para novas funcionalidades deve continuar (atualmente em espera por decisão do usuário).
+
+**II. Análises Fundamentais (Dezenas Individuais):**
+
+- II.A.1. Frequência (Absoluta, Relativa):
+    - Status: **CONCLUÍDO** (Referência: `frequency_analysis.py`, `execute_frequency.py`)
+- II.A.2. Atrasos (Atual, Médio, Máximo):
+    - Status: **CONCLUÍDO** (Referência: `delay_analysis.py`, `execute_delay.py`, `execute_max_delay.py`)
+- II.A.3. Posição de Saída (1ª a 15ª bola):
+    - Status: **CONCLUÍDO** (Referência: `positional_analysis.py`, `execute_positional_analysis.py`)
+
+**III. Análises de Relações, Conjuntos, Temporais e Estatísticas:**
+
+- **III.A: Relações e Conjuntos**
+    - III.A.1. Pares (Frequência, Atraso):
+        - Status: **CONCLUÍDO** (Referência: `combination_analysis.py`, `execute_pairs.py`)
+    - III.A.2. Itemsets Frequentes (K-Combinações - Apriori) e Regras de Associação:
+        - Itemsets Frequentes (base): **CONCLUÍDO**
+        - Métricas de Atraso para Itemsets Frequentes: **CONCLUÍDO**
+        - Trios e K-Combinações Maiores (Frequência, Atraso): **CONCLUÍDO** (Coberto pelo mecanismo genérico de itemsets)
+        - Market Basket Analysis (Regras de Associação): **CONCLUÍDO** (Referência: `combination_analysis.py` modificado, `execute_association_rules.py`)
+    - III.A.4. Linhas e Colunas (Distribuição de Quantidade por Linha/Coluna):
+        - Status: **CONCLUÍDO** (Referência: `grid_analysis.py`, `execute_grid_analysis.py`)
+    - III.A.5. Propriedades dos Números (Pares, Ímpares, Primos, Soma, etc. por sorteio):
+        - Status: **CONCLUÍDO** (Referência: `number_properties_analysis.py`, `execute_properties.py`)
+    - III.A.6. Análise de Sequências Numéricas:
+        - Sequências Consecutivas: **CONCLUÍDO**
+        - Sequências Aritméticas (com steps): **CONCLUÍDO** (Referência: `sequence_analysis.py` atualizado, `execute_sequence_analysis.py`)
+- **III.B: Segmentação Temporal/Conjuntos (Blocos, Sazonalidade)**
+    - III.B.1. Análise por Blocos (Chunks) - Frequência, Atrasos, Desvios Padrão, etc.:
+        - Status: **CONCLUÍDO** (Cálculo de desvios já existia; foco futuro em refatorar persistência para `chunk_metrics`). (Referência: `chunk_analysis.py`, `execute_chunk_evolution_analysis.py`)
+    - III.B.2. Análise por Meses/Sazonalidade:
+        - Frequência de Dezenas por Mês: **CONCLUÍDO**
+        - Análise de Propriedades Numéricas por Mês: **CONCLUÍDO** (Referência: `seasonality_analysis.py`, `execute_seasonality_analysis.py`)
+- **III.C: Análises Estatísticas Detalhadas (Nova Subseção para Organização)**
+    - III.C.1. Análise de Aderência à Distribuição Uniforme (Frequência das Dezenas):
+        - Teste Qui-Quadrado: **CONCLUÍDO**
+    - III.C.2. Análise de Aderência à Distribuição Normal (Soma das Dezenas):
+        - Teste Qui-Quadrado com Bins: **CONCLUÍDO**
+        - Teste Kolmogorov-Smirnov: **CONCLUÍDO**
+    - III.C.3. Análise de Aderência à Distribuição de Poisson (Contagem de Grupos por Sorteio - Primos, Pares, Ímpares):
+        - Teste Qui-Quadrado: **CONCLUÍDO**
+        (Referência para III.C.1, III.C.2, III.C.3: `statistical_tests_analysis.py`, `execute_statistical_tests.py`)
+    - III.C.4. Análise de Recorrência (probabilidade de retorno baseado no atraso - CDF do Atraso Atual):
+        - Status: **CONCLUÍDO** (Referência: `recurrence_analysis.py`, `execute_recurrence_analysis.py`)
+    - III.C.5. Lei de Benford:
+        - Status: **PENDENTE**
+
+**IV. Análises Cíclicas:**
+
+- IV.A.1. Identificação de Ciclos: **CONCLUÍDO**
+- IV.A.2. Estatísticas dos Ciclos (Duração, etc.): **CONCLUÍDO**
+- IV.A.3. Progressão dos Ciclos: **CONCLUÍDO**
+- IV.A.4. Métricas Detalhadas por Dezena Dentro de Cada Ciclo: **CONCLUÍDO**
+(Referência Geral para Ciclos: `cycle_analysis.py`, `cycle_closing_analysis.py`, `cycle_progression_analysis.py`, e respectivos `execute_*.py`)
+
+**V. Análises de Evolução Temporal e Blocos (Além do III.B.1 já mencionado):**
+
+- V.A.1. Repetição de Dezenas do Concurso Anterior: **CONCLUÍDO**
+- V.A.2. (Coberto por III.B.1 - Análise por Blocos)
+- V.A.3. Agregação de Dados de Bloco e Ciclo para Formato Largo: **CONCLUÍDO** (Referência: `block_aggregator.py`)
+- V.A.4. Análise de Tendência de Ranking (Global e por Bloco): **CONCLUÍDO** (Referência: `rank_trend_analysis.py`)
+- V.A.5. Análise de Tendências de Grupo (Frequência ao longo do tempo): **CONCLUÍDO** (Referência: `group_trend_analysis.py`)
+- V.A.6. Média Móvel de Atraso/Frequência (Geral, concurso a concurso):
+    - Média Móvel de Frequência Geral: **CONCLUÍDO**
+    - Média Móvel de Atraso (Atual Instantâneo) Geral: **CONCLUÍDO**
+    (Referência para Médias Móveis Gerais: `temporal_trend_analysis.py`, `execute_temporal_trend_analysis.py`)
+
+**VI. Visualizações:**
+
+- VI.A.1. Visualização de Métricas Gerais: **PENDENTE (estrutura básica existe, precisa expandir)**
+- VI.A.2. Visualização de Evolução em Chunks: **PENDENTE (estrutura básica existe, precisa expandir)**
+(Referência: `plotter.py`, `execute_metrics_viz.py`, `execute_chunk_evolution_visualization.py`)
+
+**VII. Backtesting e Estratégias:**
+
+- Item: Estrutura de Backtesting (`runner.py`, `evaluator.py`)
+    - Status: **CONCLUÍDO (Funcionalidade base)**
+- Item: Módulo de Pontuação (`scorer.py`)
+    - Status: **CONCLUÍDO (Funcionalidade base, PENDENTE para expansão com novas métricas)**
+- Item: Definição de Estratégias (`src/strategies/`)
+    - Status: **CONCLUÍDO (Exemplos básicos, PENDENTE para novas estratégias complexas)**
+- Item: Validação e Refinamento do Backtesting
+    - Status: **PENDENTE**
+
+**VIII. Melhorias Futuras/Refatorações (Adicionado com base na nossa conversa e no plano original):**
+
+- Revisitar `database_manager.py` para definir explicitamente todas as tabelas `evol_metric_...` dinâmicas (se não optarmos por consolidar).
+- Consolidar a persistência da Análise de Chunks: Refatorar `chunk_analysis.py` para salvar todas as métricas de chunk na tabela única `chunk_metrics`.
+- Refinar o `Orchestrator` para melhor detecção de falhas internas nas etapas.
+- Padronizar e consolidar o uso de constantes para nomes de colunas de bolas em `config.py` e em todo o projeto.
+- Expandir o `scorer.py` para utilizar o conjunto completo de análises disponíveis. (Próximo foco)
+
+---
+
+Este plano está agora atualizado com todo o nosso progresso.
+
+Como você indicou, o próximo grande bloco é **VII. Backtesting e Estratégias**, e dentro disso, começar revisando e planejando as modificações no `scorer.py` para que ele possa utilizar o conjunto mais rico de análises.
+
+O sistema está sendo desenhado para ser modular, permitindo que diferentes lógicas de análise e seleção de dezenas sejam implementadas, testadas e comparadas.
+
+1. **Análises Individuais (`src/analysis/`)**:
+    - **O que são**: São os diversos scripts Python que você já criou (ex: `delay_analysis.py`, `frequency_analysis.py`, `combination_analysis.py`, `cycle_analysis.py`, etc.).
+    - **Função**: Cada um realiza uma análise estatística específica sobre os dados históricos da Lotofácil.
+    - **Saída**: Os resultados de cada análise são (ou deveriam ser) salvos em tabelas dedicadas no banco de dados (gerenciado pelo `DatabaseManager`). Por exemplo, a análise de atrasos salva os atrasos de cada dezena em cada concurso.
+2. **`DatabaseManager` (`src/database_manager.py`)**:
+    - **Função**: Gerencia todas as interações com o banco de dados (SQLite, PostgreSQL, etc.). Fornece métodos para executar queries SQL (SELECTs para buscar dados, e INSERTs/UPDATEs para salvar resultados das análises).
+    - **Utilização**: Usado por todos os módulos de análise para salvar seus resultados e pelo `AnalysisAggregator` para buscar esses resultados consolidados.
+3. **`AnalysisAggregator` (`src/analysis_aggregator.py`)**:
+    - **Função Principal**: Atua como uma camada de acesso a dados consolidada e de alto nível. Seu principal método, `get_historical_metrics_for_dezenas(latest_concurso_id)`, busca dados de várias tabelas de resultados das análises individuais (usando o `DatabaseManager`), combina-os e os transforma em um **único DataFrame Pandas "largo"**.
+    - **DataFrame Agregado**: Este DataFrame tem uma linha por dezena (1-25) e múltiplas colunas, cada uma representando uma métrica relevante calculada até o `latest_concurso_id` (ex: `current_delay`, `overall_frequency`, `recent_frequency_window_10`, `recurrence_cdf`, `rank_slope`, `is_missing_in_current_cycle`, etc.).
+    - **Objetivo**: Simplificar drasticamente a busca de dados para as estratégias de pontuação. Em vez de cada estratégia precisar fazer múltiplas queries complexas, ela apenas pede este DataFrame ao `AnalysisAggregator`.
+    - **Outros Métodos**: Pode também ter métodos mais específicos para buscar dados que não se encaixam bem no DataFrame largo principal (ex: `get_itemset_analysis_data` para dados detalhados de combinações).
+4. **`BaseStrategy` (`src/strategies/base_strategy.py`)**:
+    - **Função**: Uma classe base abstrata que define o "contrato" (interface) para todas as estratégias de seleção de dezenas.
+    - **Métodos Abstratos Chave**: `get_name()`, `get_description()`, `generate_scores(latest_draw_id)`.
+    - **Método Concreto**: `select_numbers(scores_df, num_to_select)` (com uma implementação padrão que pega as N dezenas com maiores scores).
+5. **Estratégias Concretas (`src/strategies/*.py`)**:
+    - **O que são**: Classes que herdam de `BaseStrategy` e implementam uma lógica específica para pontuar dezenas.
+    - **Exemplos que Criamos/Refatoramos**:
+        - `SimpleRecencyAndDelayStrategy`
+        - `TrendAndRecurrenceStrategy`
+        - `CombinationAndPropertiesStrategy`
+        - `CycleFocusStrategy`
+    - **Funcionamento**:
+        - No `__init__`, recebem `DatabaseManager`, `config_obj`, `AnalysisAggregator`, e quaisquer parâmetros específicos da estratégia.
+        - No `generate_scores(latest_draw_id)`:
+            - Chamam `self.analysis_aggregator.get_historical_metrics_for_dezenas(latest_draw_id)` (ou outros métodos do agregador, se necessário) para obter os dados.
+            - Aplicam sua lógica de pontuação particular sobre esses dados, atribuindo um "score" para cada dezena.
+            - Retornam um DataFrame com `['dezena', 'score', 'ranking_strategy']`.
+6. **`ScorerManager` (`src/scorer.py`)**:
+    - **Função**: Gerencia e orquestra a execução das diferentes estratégias.
+    - **Descoberta**: Descobre automaticamente todas as classes de estratégia disponíveis em `src/strategies/`.
+    - **Instanciação**: Cria instâncias das estratégias quando solicitado, passando as dependências (`DatabaseManager`, `AnalysisAggregator`, `config_obj`) e parâmetros.
+    - **Interface de Execução**: Fornece métodos como `generate_scores_for_strategy(...)` e `select_numbers_for_strategy(...)` que podem ser chamados por outros componentes (como o `runner` do backtester).
+7. **Módulos de Backtesting (`src/backtester/`)**:
+    - **`runner.py` (Executor do Backtest)**:
+        - **Função**: Itera sobre os concursos históricos. Para cada concurso no período de backtest:
+            - Define o `latest_concurso_id` como o concurso anterior ao que está sendo "previsto".
+            - Chama o `ScorerManager` para obter as dezenas selecionadas por uma (ou mais) estratégia(s) configurada(s) para teste, usando esse `latest_concurso_id`.
+            - Armazena a seleção da estratégia e o resultado real do sorteio que ocorreu.
+        - **Estado Atual (Plano de Ação)**: "Estrutura de Backtesting (runner.py, evaluator.py)Status: CONCLUÍDO (Funcionalidade base)". Isso significa que você já tem uma estrutura para ele. Nossa tarefa será garantir que ele use o novo `ScorerManager` corretamente.
+    - **`evaluator.py` (Avaliador de Resultados)**:
+        - **Função**: Após o `runner.py` completar o backtest, o `evaluator.py` pega os resultados armazenados (seleções das estratégias vs. resultados reais) e calcula métricas de desempenho para cada estratégia (ex: contagem de acertos, pontuação obtida em simulações de apostas, etc.).
+        - **Estado Atual (Plano de Ação)**: Também "CONCLUÍDO (Funcionalidade base)".
+    - **`scorer.py` (Módulo de Pontuação no Plano de Ação)**:
+        - **Estado Atual (Plano de Ação)**: "CONCLUÍDO (Funcionalidade base, PENDENTE para expansão com novas métricas)".
+        - **Nosso Trabalho**: O `ScorerManager` que detalhamos e as estratégias modulares são, na prática, a "expansão" e refatoração deste `scorer.py` para que ele possa utilizar o conjunto completo de análises (via `AnalysisAggregator`) e suportar múltiplas lógicas de pontuação (as estratégias).
+8. **`main.py` e `Orchestrator` (`src/main.py`, `src/orchestrator.py`)**:
+    - **Função**: Ponto de entrada da aplicação e orquestrador do pipeline de análises.
+    - **Fluxo**:
+        1. Carrega dados brutos (`data_loader.py`).
+        2. O `Orchestrator` executa as diversas etapas de análise individuais (`src/pipeline_steps/execute_*.py`), que por sua vez usam os módulos de `src/analysis/*` para calcular métricas e salvá-las no banco via `DatabaseManager`.
+        3. **Nova Integração**: Após as análises, o `main.py` pode chamar o `run_strategy_flow` (que inicializa `AnalysisAggregator` e `ScorerManager`) para demonstrar a seleção de dezenas ou para alimentar o `runner.py` do backtester.
+
+**Em Resumo (Fluxo de Dados para Scoring e Backtesting):**
+
+Dados Históricos -> `data_loader.py` -> `Orchestrator` (executa Análises Individuais) -> Tabelas no Banco de Dados (via `DatabaseManager`)
+^                                                                                                  |
+|                                                                                                  v
+Resultados Reais <- `evaluator.py` <- Resultados do Backtest <- `runner.py` (usa `ScorerManager` para cada `latest_concurso_id`)
+^
+|
+Estratégias (`generate_scores`, `select_numbers`) <- `ScorerManager` (gerencia Estratégias)
+^
+| (solicita dados consolidados)
+|
+`AnalysisAggregator` (`get_historical_metrics_for_dezenas`) -> (lê Tabelas de Análise do BD)
+
+Este design visa criar um sistema onde:
+
+- As **análises são independentes** e salvam seus resultados.
+- O **`AnalysisAggregator` centraliza e simplifica o acesso** a esses resultados.
+- As **Estratégias são modulares**, focam na lógica de pontuação e consomem dados do `AnalysisAggregator`.
+- O **`ScorerManager` permite fácil experimentação** com diferentes estratégias.
+- O **Backtester (`runner` e `evaluator`) pode testar rigorosamente** o desempenho de cada estratégia.
+
+Espero que este resumo detalhado clarifique a arquitetura que estamos construindo para a parte de scoring e backtesting!
+
+Excelente! Sua clareza sobre a estratégia de dados é fundamental. A ideia de:
+
+1. **Manter as análises primárias em formato longo e histórico** (tabelas `ANALYSIS_*_TABLE_NAME`): Isso é crucial para a flexibilidade, análise aprofundada e rastreabilidade. É a nossa "fonte da verdade" detalhada.
+2. **Criar/Manter tabelas consolidadas (formato "wide" ou agregadas por bloco/ciclo)**: Estas servem para facilitar o consumo por certas análises (como a de tendência de rank, que pode se beneficiar de dados já agrupados por bloco) ou para otimizar a preparação de dados para as estratégias no `AnalysisAggregator`.
+
+Este é um design de dados robusto e escalável. E você está certo, com as muitas análises que temos, precisamos garantir que todas sejam devidamente incorporadas nesse fluxo.
+
+**Nosso Plano de Ação Estratégico (Reafirmado e Refinado):**
+
+Com base na sua orientação, vamos refinar o plano:
+
+**Fase 1: Padronização da Base e do `AnalysisAggregator` (Praticamente Concluída em Planejamento)**
+* Constantes de nomes de tabelas em `config.py`. **(OK)**
+* `AnalysisAggregator` refatorado para usar essas constantes. **(OK)**
+
+**Fase 2: Garantir População Correta das Tabelas `ANALYSIS_*` (Formato Longo Histórico)**
+* Continuar refatorando os scripts `src/pipeline_steps/execute_*.py` para que cada um:
+* Calcule suas métricas historicamente (concurso a concurso).
+* Use nomes de colunas padronizados.
+* Salve na respectiva tabela `config_obj.ANALYSIS_*_TABLE_NAME`.
+* **Próximos scripts nesta fase**:
+* `execute_frequent_itemset_metrics.py` (já temos um plano detalhado).
+* `execute_cycle_progression.py` (para popular `ANALYSIS_CYCLE_STATUS_DEZENAS_TABLE_NAME` - já temos um plano detalhado).
+* Lógica para `ANALYSIS_RANK_TREND_METRICS_TABLE_NAME` (que depende da Fase 3).
+* E então, sistematicamente, todos os outros `execute_*.py` para garantir que suas saídas primárias também sigam um padrão (mesmo que o `AnalysisAggregator` não as consuma diretamente, a consistência é boa).
+
+**Fase 3: Revisão e Refatoração dos Agregadores Intermediários (Ex: `block_aggregator.py`)**
+* Após a Fase 2, quando as tabelas `ANALYSIS_*` estiverem estáveis:
+* **Analisar `block_aggregator.py` (NOSSO FOCO ATUAL DE DISCUSSÃO)**:
+* **Entradas Atuais**: Confirmar as tabelas `evol_metric_*` e `evol_rank_*` que ele lê.
+* **Decisão Chave**:
+* **Opção A (Manter Geradores de `evol_*`)**: As etapas que geram as tabelas `evol_metric_*_bloco` (como `execute_chunk_evolution_analysis.py` e a parte de `calculate_and_persist_rank_per_chunk` em `execute_rank_trend_analysis.py`) continuam a fazê-lo. Elas podem, internamente, ler das novas tabelas `ANALYSIS_*` para obter os dados base por concurso e então aplicar a lógica de "chunking". Isso mantém o `block_aggregator.py` com poucas alterações em suas leituras.
+* **Opção B (Modificar `block_aggregator.py` para fazer o Chunking)**: Simplificar as etapas anteriores para que apenas gerem as tabelas `ANALYSIS_*` (longo, por concurso). O `block_aggregator.py` se torna responsável por ler essas tabelas `ANALYSIS_*` e aplicar a lógica de "chunking" (divisão em blocos e cálculo de métricas por bloco) internamente antes de pivotar para o formato largo.
+* **Métricas a Incluir**: Identificar quais métricas das tabelas `ANALYSIS_*` (ou outras análises) devem ser agregadas por bloco e incluídas nas tabelas `bloco_analises_consolidadas_*`. Aqui entram as "muitas coisas que adicionamos nos últimos dias".
+* **Estrutura da Saída**: Confirmar se o formato largo atual é o ideal ou se um formato diferente seria mais útil.
+* **Nomes das Tabelas de Saída**: Padronizar os nomes das tabelas `bloco_analises_consolidadas_*` em `config.py`.
+
+    `* Analisar outros possíveis agregadores ou tabelas consolidadas.`
+
+**Fase 4: Implementar Análises Avançadas e Finalizar `AnalysisAggregator`**
+* Implementar a lógica de `rank_slope` e `trend_status`, que agora lerá da tabela de blocos agregada e padronizada (saída da Fase 3).
+* Garantir que o `AnalysisAggregator` (que consome as tabelas `ANALYSIS_*` e, potencialmente, algumas tabelas consolidadas da Fase 3) esteja completo e forneça todas as features para o `Scorer`.
+
+**Sua "Decisão Necessária" é crucial aqui:**
+
+Você mencionou: *"acho que podemos seguir o caminho de manter as tabelas em formato longo e alterar o execute que é quem cria as tabelas para que também alimente uma tabela em formato wide. Manter esse padrão para todas as análises que temos, são muitas já."*
+
+Se entendi bem, você está sugerindo que cada script `execute_*.py` (da Fase 2), além de salvar sua tabela principal em formato longo histórico (ex: `ANALYSIS_DELAYS_TABLE_NAME`), também seria responsável por gerar uma versão "agregada por bloco" ou "wide" se essa métrica específica fizer sentido ser vista dessa forma pelo `block_aggregator.py` ou outro consumidor?
+
+Isso é uma variação interessante. Poderia significar que:
+
+- `execute_delay.py` salvaria em `ANALYSIS_DELAYS_TABLE_NAME` (longo, por concurso). E, se necessário, também calcularia e salvaria uma `evol_metric_atraso_bloco_...` (agregado por bloco).
+- `execute_frequency.py` salvaria em `ANALYSIS_FREQUENCY_OVERALL_TABLE_NAME` (longo, por concurso). E também uma `evol_metric_frequency_bloco_...`.
+
+Isso manteria o `block_aggregator.py` com entradas mais diretas no formato de bloco que ele já espera. A desvantagem é que a lógica de "chunking" ficaria distribuída por vários scripts `execute_*`.
+
+A **Opção B** da Fase 3 (fazer o `block_aggregator.py` ler das tabelas `ANALYSIS_*` longas e ele mesmo fazer o chunking) centralizaria a lógica de chunking em um só lugar, o que poderia ser mais fácil de manter. As etapas `execute_*` primárias focariam apenas em gerar o histórico detalhado por concurso.

@@ -1,86 +1,95 @@
-# Lotofacil_Analysis/src/analysis/frequency_analysis.py
+# src/analysis/frequency_analysis.py
 import pandas as pd
-from typing import List, Dict, Any 
 import logging
+from typing import Dict, Optional, Any # Adicionado Any
 
 logger = logging.getLogger(__name__)
 
-def calculate_frequency(all_data_df: pd.DataFrame, config: Any) -> pd.DataFrame:
+def calculate_frequency(
+    all_data_df: pd.DataFrame, 
+    config: Any, # Espera config_obj
+    # target_contest_id: Optional[int] = None # Removido, pois o df já vem filtrado
+    # run_all: bool = True # Removido, pois o df já vem filtrado
+    specific_numbers: Optional[list[int]] = None
+) -> Optional[pd.DataFrame]:
     """
-    Calcula a frequência absoluta de cada dezena em todos os concursos.
+    Calcula a frequência absoluta das dezenas.
+    O DataFrame de entrada 'all_data_df' já deve estar filtrado até o concurso desejado.
     """
-    step_name_interno = "calculate_frequency (analysis)"
-    logger.info(f"Interno: Iniciando {step_name_interno}.")
+    # logger.info("Interno: Iniciando calculate_frequency (analysis).") # MUDADO PARA DEBUG ou REMOVIDO
+    logger.debug("Interno: Iniciando calculate_frequency (analysis).")
 
-    if all_data_df is None or all_data_df.empty:
-        logger.warning(f"DataFrame de entrada para {step_name_interno} está vazio.")
-        return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
+    if all_data_df.empty:
+        logger.warning("DataFrame vazio fornecido para calculate_frequency.")
+        # Retorna um DataFrame com a estrutura esperada, mas com frequência zero
+        dezenas_para_retorno = specific_numbers if specific_numbers else config.ALL_NUMBERS
+        return pd.DataFrame({'Dezena': dezenas_para_retorno, 'Frequencia Absoluta': 0})
 
-    try:
-        if not hasattr(config, 'BALL_NUMBER_COLUMNS') or not config.BALL_NUMBER_COLUMNS:
-            logger.error(f"config.BALL_NUMBER_COLUMNS não definido ou vazio em {step_name_interno}.")
-            return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
-        if not hasattr(config, 'ALL_NUMBERS') or not config.ALL_NUMBERS:
-            logger.error(f"config.ALL_NUMBERS não definido ou vazio em {step_name_interno}.")
-            return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
+    # Usa as colunas de bolas definidas no config
+    ball_columns_to_use = [col for col in config.BALL_NUMBER_COLUMNS if col in all_data_df.columns]
+    if not ball_columns_to_use:
+        logger.error("Nenhuma coluna de bola encontrada no DataFrame para calculate_frequency.")
+        return None # Ou DataFrame com zeros
 
-        dezena_cols = config.BALL_NUMBER_COLUMNS
-        actual_dezena_cols = [col for col in dezena_cols if col in all_data_df.columns]
-
-        if not actual_dezena_cols:
-             logger.error(f"Nenhuma coluna de bola ({dezena_cols}) encontrada em all_data_df para {step_name_interno}. Colunas disponíveis: {all_data_df.columns.tolist()}")
-             return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
-        
-        # Coleta todos os números de todas as colunas de bolas relevantes
-        all_numeric_balls = []
-        for col in actual_dezena_cols:
-            # Converte para numérico, forçando erros para NaN, depois remove NaNs e converte para int
-            numeric_col = pd.to_numeric(all_data_df[col], errors='coerce')
-            all_numeric_balls.extend(numeric_col.dropna().astype(int).tolist())
-
-        if not all_numeric_balls:
-            logger.warning(f"Nenhum número sorteado válido encontrado em {step_name_interno} após processar colunas de bolas.")
-            return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
-
-        frequency_series = pd.Series(all_numeric_balls).value_counts()
-        
-        frequency_df = frequency_series.reindex(config.ALL_NUMBERS, fill_value=0).reset_index()
-        frequency_df.columns = ['Dezena', 'Frequencia Absoluta'] # Nomes de coluna fixos, como no seu original
-        frequency_df['Dezena'] = frequency_df['Dezena'].astype(int)
-        frequency_df['Frequencia Absoluta'] = frequency_df['Frequencia Absoluta'].astype(int)
-        
-        logger.info(f"Frequência absoluta calculada para {len(frequency_df)} dezenas em {step_name_interno}.")
-        return frequency_df.sort_values(by='Frequencia Absoluta', ascending=False)
-
-    except AttributeError as ae: 
-        logger.error(f"Erro de atributo em {step_name_interno} (verifique 'config'): {ae}", exc_info=True)
-        return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
-    except Exception as e:
-        logger.error(f"Erro ao calcular a frequência absoluta em {step_name_interno}: {e}", exc_info=True)
-        return pd.DataFrame({'Dezena': [], 'Frequencia Absoluta': []})
-
-def calculate_relative_frequency(absolute_freq_df: pd.DataFrame, total_contests: int, config: Any) -> pd.DataFrame:
-    step_name_interno = "calculate_relative_frequency (analysis)"
-    logger.info(f"Interno: Iniciando {step_name_interno}.")
-    if absolute_freq_df is None or absolute_freq_df.empty:
-        logger.warning(f"DataFrame de frequência absoluta para {step_name_interno} está vazio.")
-        return pd.DataFrame({'Dezena': [], 'Frequencia Relativa': []})
+    # Concatena todas as colunas de bolas em uma única série
+    all_drawn_numbers = pd.concat([all_data_df[col] for col in ball_columns_to_use], ignore_index=True)
+    all_drawn_numbers.dropna(inplace=True) # Remove NaNs que podem surgir de colunas de bolas parcialmente preenchidas
     
-    if total_contests <= 0:
-        logger.error(f"Número total de concursos inválido ({total_contests}) para {step_name_interno}.")
-        return pd.DataFrame({'Dezena': [], 'Frequencia Relativa': []})
-
     try:
-        if 'Dezena' not in absolute_freq_df.columns or 'Frequencia Absoluta' not in absolute_freq_df.columns:
-            logger.error(f"Colunas 'Dezena' ou 'Frequencia Absoluta' ausentes em {step_name_interno}.")
-            return pd.DataFrame({'Dezena': [], 'Frequencia Relativa': []})
-            
-        relative_freq_df = absolute_freq_df.copy()
-        relative_freq_df['Frequencia Relativa'] = (relative_freq_df['Frequencia Absoluta'] / total_contests)
-        
-        logger.info(f"Frequência relativa calculada para {len(relative_freq_df)} dezenas em {step_name_interno}.")
-        return relative_freq_df[['Dezena', 'Frequencia Relativa']].sort_values(by='Frequencia Relativa', ascending=False)
-        
+        # Tenta converter para inteiro, tratando erros
+        all_drawn_numbers = pd.to_numeric(all_drawn_numbers, errors='coerce')
+        all_drawn_numbers.dropna(inplace=True) # Remove NaNs após conversão
+        all_drawn_numbers = all_drawn_numbers.astype(int)
     except Exception as e:
-        logger.error(f"Erro ao calcular a frequência relativa em {step_name_interno}: {e}", exc_info=True)
-        return pd.DataFrame({'Dezena': [], 'Frequencia Relativa': []})
+        logger.error(f"Erro ao converter dezenas para inteiro em calculate_frequency: {e}")
+        return None
+
+    # Calcula a contagem de frequência
+    frequency_counts = all_drawn_numbers.value_counts().sort_index()
+    
+    # Prepara o DataFrame de resultado
+    dezenas_para_analise = specific_numbers if specific_numbers else config.ALL_NUMBERS
+    df_frequency = pd.DataFrame({
+        'Dezena': dezenas_para_analise # Usa a constante DEZENA_COLUMN_NAME do config
+    })
+    
+    # Mapeia as frequências calculadas, preenchendo com 0 para dezenas não sorteadas
+    df_frequency['Frequencia Absoluta'] = df_frequency['Dezena'].map(frequency_counts).fillna(0).astype(int)
+    
+    # logger.info(f"Frequência absoluta calculada para {len(df_frequency)} dezenas em calculate_frequency (analysis).") # MUDADO PARA DEBUG ou REMOVIDO
+    logger.debug(f"Frequência absoluta calculada para {len(df_frequency)} dezenas em calculate_frequency (analysis).")
+    return df_frequency
+
+
+def calculate_relative_frequency(
+    df_frequency_abs: pd.DataFrame, 
+    total_draws: int, 
+    config: Any # Espera config_obj
+) -> Optional[pd.DataFrame]:
+    """
+    Calcula a frequência relativa das dezenas.
+    Espera um DataFrame com colunas 'Dezena' e 'Frequencia Absoluta'.
+    """
+    # logger.info("Interno: Iniciando calculate_relative_frequency (analysis).") # MUDADO PARA DEBUG ou REMOVIDO
+    logger.debug("Interno: Iniciando calculate_relative_frequency (analysis).")
+
+    if df_frequency_abs.empty:
+        logger.warning("DataFrame de frequência absoluta vazio para calculate_relative_frequency.")
+        return pd.DataFrame({'Dezena': config.ALL_NUMBERS, 'Frequencia Relativa': 0.0})
+    
+    if 'Dezena' not in df_frequency_abs.columns or 'Frequencia Absoluta' not in df_frequency_abs.columns:
+        logger.error("Colunas 'Dezena' ou 'Frequencia Absoluta' não encontradas no DataFrame de entrada.")
+        return None
+
+    if total_draws == 0:
+        logger.warning("Total de sorteios é zero. Frequência relativa será zero.")
+        df_relative_frequency = df_frequency_abs[['Dezena']].copy()
+        df_relative_frequency['Frequencia Relativa'] = 0.0
+        return df_relative_frequency
+
+    df_relative_frequency = df_frequency_abs.copy()
+    df_relative_frequency['Frequencia Relativa'] = (df_relative_frequency['Frequencia Absoluta'] / total_draws).round(6)
+    
+    # logger.info(f"Frequência relativa calculada para {len(df_relative_frequency)} dezenas em calculate_relative_frequency (analysis).") # MUDADO PARA DEBUG ou REMOVIDO
+    logger.debug(f"Frequência relativa calculada para {len(df_relative_frequency)} dezenas em calculate_relative_frequency (analysis).")
+    return df_relative_frequency
