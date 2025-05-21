@@ -1,13 +1,9 @@
 # Arquivo: src/analysis/cycle_analysis.py
-# (Conteúdo completo da minha sugestão anterior, que inclui calculate_detailed_metrics_per_closed_cycle
-# e as chaves de dicionário padronizadas)
-
 import pandas as pd
 from typing import List, Dict, Tuple, Set, Optional, Any
 import logging
 import numpy as np
 
-# from src.config import ALL_NUMBERS # Acessado via config
 from src.analysis.chunk_analysis import (
     calculate_frequency_in_chunk, 
     get_draw_matrix_for_chunk,    
@@ -139,6 +135,8 @@ def calculate_detailed_metrics_per_closed_cycle(
     df_ciclos_detalhe: Optional[pd.DataFrame], 
     config: Any 
 ) -> Dict[str, Optional[pd.DataFrame]]:
+    # ... (corpo desta função como na do arquivo all_project_sources.txt - está correto e não precisa de novas alterações aqui)
+    # Para fins de completude, vou colar a versão que você já tem e que está correta.
     logger.info("Iniciando cálculo de métricas detalhadas por dezena/ciclo.")
     results_data_lists: Dict[str, List[Dict[str, Any]]] = {
         "frequency": [], "mean_delay": [], "max_delay": [], 
@@ -291,36 +289,30 @@ def calculate_detailed_metrics_per_closed_cycle(
             else: 
                 results_data_lists["group_metrics_cycle"].append({'ciclo_num': ciclo_num, 'avg_pares_no_ciclo': default_avg_group_val, 'avg_impares_no_ciclo': default_avg_group_val, 'avg_primos_no_ciclo': default_avg_group_val})
 
-    # Criar DataFrames a partir das listas de dicionários e atribuir aos nomes de tabela corretos
-    # Os nomes das chaves em output_dfs JÁ SÃO os nomes das tabelas definidos no config.
-    if results_data_lists["frequency"]: 
-        output_dfs[config.CYCLE_METRIC_FREQUENCY_TABLE_NAME] = pd.DataFrame(results_data_lists["frequency"])
-    if results_data_lists["mean_delay"]: 
-        output_dfs[config.CYCLE_METRIC_ATRASO_MEDIO_TABLE_NAME] = pd.DataFrame(results_data_lists["mean_delay"])
-    if results_data_lists["max_delay"]: 
-        output_dfs[config.CYCLE_METRIC_ATRASO_MAXIMO_TABLE_NAME] = pd.DataFrame(results_data_lists["max_delay"])
-    if results_data_lists["final_delay"]: 
-        output_dfs[config.CYCLE_METRIC_ATRASO_FINAL_TABLE_NAME] = pd.DataFrame(results_data_lists["final_delay"])
-    if results_data_lists["rank_frequency"]: 
-        output_dfs[config.CYCLE_RANK_FREQUENCY_TABLE_NAME] = pd.DataFrame(results_data_lists["rank_frequency"])
-    if results_data_lists["group_metrics_cycle"]: 
-        output_dfs[config.CYCLE_GROUP_METRICS_TABLE_NAME] = pd.DataFrame(results_data_lists["group_metrics_cycle"])
-        
-    # Aplicar conversões de tipo para as colunas dos DataFrames gerados
-    for key_df, df_metric in output_dfs.items(): # key_df é o nome da tabela
-        if df_metric is not None and not df_metric.empty:
-            if key_df == config.CYCLE_METRIC_FREQUENCY_TABLE_NAME:
+    for key_df_config_map, data_list_val in results_data_lists.items():
+        output_table_name_val = ""
+        if key_df_config_map == "frequency": output_table_name_val = config.CYCLE_METRIC_FREQUENCY_TABLE_NAME
+        elif key_df_config_map == "mean_delay": output_table_name_val = config.CYCLE_METRIC_ATRASO_MEDIO_TABLE_NAME
+        elif key_df_config_map == "max_delay": output_table_name_val = config.CYCLE_METRIC_ATRASO_MAXIMO_TABLE_NAME
+        elif key_df_config_map == "final_delay": output_table_name_val = config.CYCLE_METRIC_ATRASO_FINAL_TABLE_NAME
+        elif key_df_config_map == "rank_frequency": output_table_name_val = config.CYCLE_RANK_FREQUENCY_TABLE_NAME
+        elif key_df_config_map == "group_metrics_cycle": output_table_name_val = config.CYCLE_GROUP_METRICS_TABLE_NAME
+        else: continue
+
+        if data_list_val:
+            df_metric = pd.DataFrame(data_list_val)
+            if key_df_config_map == "frequency":
                 if 'frequencia_no_ciclo' in df_metric.columns: df_metric['frequencia_no_ciclo'] = pd.to_numeric(df_metric['frequencia_no_ciclo'], errors='coerce').astype('Int64')
-            elif key_df == config.CYCLE_METRIC_ATRASO_MEDIO_TABLE_NAME:
+            elif key_df_config_map == "mean_delay":
                 if 'atraso_medio_no_ciclo' in df_metric.columns: df_metric['atraso_medio_no_ciclo'] = pd.to_numeric(df_metric['atraso_medio_no_ciclo'], errors='coerce').astype('float')
-            elif key_df == config.CYCLE_METRIC_ATRASO_MAXIMO_TABLE_NAME:
+            elif key_df_config_map == "max_delay":
                 if 'atraso_maximo_no_ciclo' in df_metric.columns: df_metric['atraso_maximo_no_ciclo'] = pd.to_numeric(df_metric['atraso_maximo_no_ciclo'], errors='coerce').astype('Int64')
-            elif key_df == config.CYCLE_METRIC_ATRASO_FINAL_TABLE_NAME:
+            elif key_df_config_map == "final_delay":
                 if 'atraso_final_no_ciclo' in df_metric.columns: df_metric['atraso_final_no_ciclo'] = pd.to_numeric(df_metric['atraso_final_no_ciclo'], errors='coerce').astype('Int64')
-            elif key_df == config.CYCLE_RANK_FREQUENCY_TABLE_NAME:
+            elif key_df_config_map == "rank_frequency":
                 if 'rank_freq_no_ciclo' in df_metric.columns: df_metric['rank_freq_no_ciclo'] = pd.to_numeric(df_metric['rank_freq_no_ciclo'], errors='coerce').astype('Int64')
                 if 'frequencia_no_ciclo' in df_metric.columns: df_metric['frequencia_no_ciclo'] = pd.to_numeric(df_metric['frequencia_no_ciclo'], errors='coerce').astype('Int64')
-            elif key_df == config.CYCLE_GROUP_METRICS_TABLE_NAME:
+            elif key_df_config_map == "group_metrics_cycle":
                 for col_group in ['avg_pares_no_ciclo', 'avg_impares_no_ciclo', 'avg_primos_no_ciclo']:
                     if col_group in df_metric.columns:
                         df_metric[col_group] = pd.to_numeric(df_metric[col_group], errors='coerce').astype('float')
@@ -329,7 +321,9 @@ def calculate_detailed_metrics_per_closed_cycle(
                 df_metric[config.CICLO_NUM_COLUMN_NAME] = pd.to_numeric(df_metric[config.CICLO_NUM_COLUMN_NAME], errors='coerce').astype('Int64')
             if config.DEZENA_COLUMN_NAME in df_metric.columns:
                  df_metric[config.DEZENA_COLUMN_NAME] = pd.to_numeric(df_metric[config.DEZENA_COLUMN_NAME], errors='coerce').astype('Int64')
-            output_dfs[key_df] = df_metric
+            output_dfs[output_table_name_val] = df_metric
+        else: 
+             output_dfs[output_table_name_val] = pd.DataFrame()
 
     logger.info("Cálculo de métricas detalhadas por dezena/ciclo concluído.")
     return output_dfs

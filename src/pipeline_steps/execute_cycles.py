@@ -1,14 +1,12 @@
 # Arquivo: src/pipeline_steps/execute_cycles.py
-# (Conteúdo completo da minha sugestão anterior, corrigindo a chamada e usando as chaves e nomes de tabela padronizados)
-
 import pandas as pd
 import logging
 from typing import Dict, Any, Optional
 
 # Importa a função de análise e as chaves padronizadas
 from src.analysis.cycle_analysis import identify_and_process_cycles, KEY_CYCLE_DETAILS_DF, KEY_CYCLE_SUMMARY_DF
-# from src.database_manager import DatabaseManager # Para type hint se usar db_manager: DatabaseManager
-# from src.config import Config # Para type hint se usar config: Config
+# from src.database_manager import DatabaseManager # Para type hint
+# from src.config import Config # Para type hint
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +22,7 @@ def run_cycle_identification_step(
     df_details_to_return: Optional[pd.DataFrame] = None 
 
     try:
-        # CHAMADA CORRIGIDA: usa 'config' diretamente, que é o config_obj
-        # E a função identify_and_process_cycles é importada diretamente.
+        # Chamada direta à função importada, passando o config_obj
         cycle_analysis_results = identify_and_process_cycles(all_data_df, config)
 
         if not cycle_analysis_results:
@@ -50,7 +47,6 @@ def run_cycle_identification_step(
             if isinstance(df_details, pd.DataFrame): 
                 df_details_to_return = df_details
 
-
         # Usando a chave padronizada para obter o DataFrame de sumário
         df_summary = cycle_analysis_results.get(KEY_CYCLE_SUMMARY_DF)
         if df_summary is not None and not df_summary.empty:
@@ -69,8 +65,6 @@ def run_cycle_identification_step(
         else:
             logger.info(f"Etapa {step_name} concluída, sem novos dados salvos (ou dados já existentes).")
 
-        # Retorna o DataFrame de detalhes para o shared_context, se o orchestrator estiver configurado com output_key
-        # (No main.py, para 'cycle_identification', o output_key é 'cycles_detail_df')
         return df_details_to_return
 
     except Exception as e:
